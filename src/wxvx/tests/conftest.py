@@ -52,6 +52,7 @@ def config_data():
         "baseline": {
             "compare": True,
             "name": "GFS",
+            "type": "grid",
             "url": "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2",
         },
         "cycles": {
@@ -97,6 +98,7 @@ def config_data():
                 "baseline": "/path/to/grids/baseline",
                 "forecast": "/path/to/grids/forecast",
             },
+            "obs": "/path/to/obs",
             "run": "/path/to/run",
         },
         "regrid": {
@@ -169,17 +171,20 @@ def fakefs(fs):
 @fixture
 def gen_config():
     def gen_config(config_data, rootpath) -> Config:
-        dirs = ("grids/baseline", "grids/forecast", "run")
-        grids_baseline, grids_forecast, run = [rootpath / x for x in dirs]
-        grids_baseline.mkdir(parents=True)
-        grids_forecast.mkdir(parents=True)
-        run.mkdir()
+        dirs = ("grids/baseline", "grids/forecast", "obs", "run")
+        grids_baseline, grids_forecast, obs, run = [str(rootpath / x) for x in dirs]
+        for x in grids_baseline, grids_forecast, obs, run:
+            Path(x).mkdir(parents=True)
         return Config(
             {
                 **config_data,
                 "paths": {
-                    "grids": {"baseline": str(grids_baseline), "forecast": str(grids_forecast)},
-                    "run": str(run),
+                    "grids": {
+                        "baseline": grids_baseline,
+                        "forecast": grids_forecast,
+                    },
+                    "obs": obs,
+                    "run": run,
                 },
             }
         )

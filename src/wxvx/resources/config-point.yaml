@@ -1,0 +1,37 @@
+baseline:
+  compare: false
+  name: PREPBUFR
+  type: point
+  url: https://noaa-reanalyses-pds.s3.amazonaws.com/observations/reanalysis/conv/prepbufr/{{ yyyymmdd[:4] }}/{{ yyyymmdd[4:6] }}/prepbufr/gdas.{{ yyyymmdd }}.t{{hh }}z.prepbufr.nr
+cycles:
+  - 2022-02-01T12:00:00
+forecast:
+  coords:
+    latitude: latitude
+    level: level
+    longitude: longitude
+    time:
+      inittime: forecast_reference_time
+      validtime: time
+  name: AIWX
+  path: /path/to/forecast.zarr
+  projection:
+    proj: latlon
+leadtimes: [0]
+meta:
+  grids: "{{ meta.workdir }}/grids"
+  levels: &levels [1000]
+  workdir: /path/to/workdir
+paths:
+  grids:
+    forecast: "{{ meta.grids }}/forecast"
+  obs: "{{ meta.workdir }}/obs"
+  run: "{{ meta.workdir }}/run"
+regrid:
+  method: BILIN
+  to: G004
+variables:
+  temperature:
+    level_type: isobaricInhPa
+    levels: *levels
+    name: t

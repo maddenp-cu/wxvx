@@ -34,6 +34,12 @@
         "name": {
           "type": "string"
         },
+        "type": {
+          "enum": [
+            "grid",
+            "point"
+          ]
+        },
         "url": {
           "type": "string"
         }
@@ -41,6 +47,7 @@
       "required": [
         "compare",
         "name",
+        "type",
         "url"
       ],
       "type": "object"
@@ -273,6 +280,27 @@
     },
     "paths": {
       "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "grids": {
+              "required": [
+                "baseline"
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "obs": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "obs"
+          ]
+        }
+      ],
       "properties": {
         "grids": {
           "additionalProperties": false,
@@ -285,10 +313,12 @@
             }
           },
           "required": [
-            "baseline",
             "forecast"
           ],
           "type": "object"
+        },
+        "obs": {
+          "type": "string"
         },
         "run": {
           "type": "string"
@@ -325,10 +355,8 @@
           ]
         },
         "to": {
-          "enum": [
-            "baseline",
-            "forecast"
-          ]
+          "pattern": "^baseline|forecast|G[0-9]{3}$",
+          "type": "string"
         }
       },
       "type": "object"

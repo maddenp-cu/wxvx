@@ -112,6 +112,22 @@ def test_workflow_stats(c, noop):
     assert len(val.ref) == len(c.variables) + 1  # for 2x SPFH levels
 
 
+def test_workflow__config_grid_stat(c, fakefs):
+    path = fakefs / "refc.config"
+    assert not path.is_file()
+    workflow._config_grid_stat(
+        c=c,
+        path=path,
+        varname="REFC",
+        rundir=fakefs,
+        var=variables.Var(name="refc", level_type="atmosphere"),
+        prefix="foo",
+        source=Source.FORECAST,
+        polyfile=None,
+    )
+    assert path.is_file()
+
+
 def test_workflow__existing(fakefs):
     path = fakefs / "forecast"
     assert not ready(workflow._existing(path=path))
@@ -143,7 +159,7 @@ def test_workflow__grib_index_data(c, tc):
         yield "mock"
         yield asset(idxfile, idxfile.exists)
 
-    with patch.object(workflow, "_grib_index_file", mock):
+    with patch.object(workflow, "_local_file_from_http", mock):
         val = workflow._grib_index_data(
             c=c, outdir=c.paths.grids_baseline, tc=tc, url=c.baseline.url
         )
@@ -152,19 +168,6 @@ def test_workflow__grib_index_data(c, tc):
             name="HGT", levstr="900 mb", firstbyte=0, lastbyte=0
         )
     }
-
-
-def test_workflow__grib_index_file(c):
-    url = f"{c.baseline.url}.idx"
-    val = workflow._grib_index_file(outdir=c.paths.grids_baseline, url=url)
-    path: Path = val.ref
-    assert not path.exists()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with patch.object(workflow, "fetch") as fetch:
-        fetch.side_effect = lambda taskname, url, path: path.touch()  # noqa: ARG005
-        workflow._grib_index_file(outdir=c.paths.grids_baseline, url=url)
-    fetch.assert_called_once_with(ANY, url, ANY)
-    assert path.exists()
 
 
 @mark.parametrize(
@@ -226,6 +229,19 @@ def test_workflow__grid_nc(c_real_fs, check_cf_metadata, da_with_leadtime, tc):
     check_cf_metadata(ds=xr.open_dataset(val.ref, decode_timedelta=True), name="HGT", level=level)
 
 
+def test_workflow__local_file_from_http(c):
+    url = f"{c.baseline.url}.idx"
+    val = workflow._local_file_from_http(outdir=c.paths.grids_baseline, url=url, desc="Test")
+    path: Path = val.ref
+    assert not path.exists()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with patch.object(workflow, "fetch") as fetch:
+        fetch.side_effect = lambda taskname, url, path: path.touch()  # noqa: ARG005
+        workflow._local_file_from_http(outdir=c.paths.grids_baseline, url=url, desc="Test")
+    fetch.assert_called_once_with(ANY, url, ANY)
+    assert path.exists()
+
+
 def test_workflow__polyfile(fakefs):
     path = fakefs / "a.poly"
     assert not path.is_file()
@@ -268,17 +284,17 @@ def test_workflow__plot(c, dictkey, fakefs, fs):
     xticks.assert_called_once_with(ticks=[0, 6, 12], labels=["000", "006", "012"], rotation=90)
 
 
-def test_workflow__stat(c, fakefs, tc):
+def test_workflow__stats_vs_grid(c, fakefs, tc):
     @external
     def mock(*_args, **_kwargs):
         yield "mock"
         yield asset(Path("/some/file"), lambda: True)
 
     rundir = fakefs / "run" / "stats" / "19700101" / "00" / "000"
-    taskname = "MET stats for baseline 2t-heightAboveGround-0002 at 19700101 00Z 000"
+    taskname = "Stats vs grid for baseline 2t-heightAboveGround-0002 at 19700101 00Z 000"
     var = variables.Var(name="2t", level_type="heightAboveGround", level=2)
     kwargs = dict(c=c, varname="T2M", tc=tc, var=var, prefix="foo", source=Source.BASELINE)
-    stat = workflow._stat(**kwargs, dry_run=True).ref
+    stat = workflow._stats_vs_grid(**kwargs, dry_run=True).ref
     cfgfile = (rundir / stat.stem).with_suffix(".config")
     runscript = (rundir / stat.stem).with_suffix(".sh")
     assert not stat.is_file()
@@ -287,11 +303,10 @@ def test_workflow__stat(c, fakefs, tc):
     with (
         patch.object(workflow, "_grid_grib", mock),
         patch.object(workflow, "_grid_nc", mock),
-        patch.object(workflow, "_grid_stat_config", side_effect=lambda *_: cfgfile.touch()),
         patch.object(workflow, "mpexec", side_effect=lambda *_: stat.touch()) as mpexec,
     ):
         stat.parent.mkdir(parents=True)
-        workflow._stat(**kwargs)
+        workflow._stats_vs_grid(**kwargs)
     assert stat.is_file()
     assert cfgfile.is_file()
     assert runscript.is_file()
@@ -299,22 +314,6 @@ def test_workflow__stat(c, fakefs, tc):
 
 
 # Support Tests
-
-
-def test_workflow__grid_stat_config(c, fakefs):
-    path = fakefs / "refc.config"
-    assert not path.is_file()
-    workflow._grid_stat_config(
-        c=c,
-        path=path,
-        varname="REFC",
-        rundir=fakefs,
-        var=variables.Var(name="refc", level_type="atmosphere"),
-        prefix="foo",
-        source=Source.FORECAST,
-        polyfile=None,
-    )
-    assert path.is_file()
 
 
 def test_workflow__meta(c):
@@ -364,20 +363,20 @@ def test_workflow__statargs(c, statkit, cycle):
 @mark.parametrize("cycle", [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
 def test_workflow__statreqs(c, statkit, cycle):
     with (
-        patch.object(workflow, "_stat") as _stat,
+        patch.object(workflow, "_stats_vs_grid") as _stats_vs_grid,
         patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
         patch.object(workflow, "gen_validtimes", return_value=[statkit.tc]),
     ):
         reqs = workflow._statreqs(c=c, varname=statkit.varname, level=statkit.level, cycle=cycle)
     assert len(reqs) == 2
-    assert _stat.call_count == 2
+    assert _stats_vs_grid.call_count == 2
     args = (c, statkit.varname, statkit.tc, statkit.var)
-    assert _stat.call_args_list[0].args == (
+    assert _stats_vs_grid.call_args_list[0].args == (
         *args,
         f"forecast_gh_{statkit.level_type}_{statkit.level:04d}",
         Source.FORECAST,
     )
-    assert _stat.call_args_list[1].args == (
+    assert _stats_vs_grid.call_args_list[1].args == (
         *args,
         f"gfs_gh_{statkit.level_type}_{statkit.level:04d}",
         Source.BASELINE,
@@ -419,6 +418,18 @@ def test_workflow__vxvars(c):
         Var("q", "isobaricInhPa", 900): "SPFH",
         Var("refc", "atmosphere"): "REFC",
     }
+
+
+def test_workflow__write_runscript(fakefs):
+    path = fakefs / "runscript"
+    assert not path.exists()
+    workflow._write_runscript(path=path, content="foo")
+    expected = """
+    #!/usr/bin/env bash
+
+    foo
+    """
+    assert path.read_text().strip() == dedent(expected).strip()
 
 
 # Fixtures

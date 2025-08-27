@@ -21,12 +21,24 @@ Source = Enum(
     ],
 )
 
+VxType = Enum(
+    "VxType",
+    [
+        ("GRID", auto()),
+        ("POINT", auto()),
+    ],
+)
+
 
 @dataclass(frozen=True)
 class Baseline:
     compare: bool
     name: str
     url: str
+    type: str
+
+    def __post_init__(self):
+        _force(self, "type", VxType.POINT if self.type == "point" else VxType.GRID)
 
 
 class Config:
@@ -37,7 +49,7 @@ class Config:
         self.cycles = Cycles(raw["cycles"])
         self.forecast = Forecast(**raw["forecast"])
         self.leadtimes = Leadtimes(raw["leadtimes"])
-        self.paths = Paths(grids["baseline"], grids["forecast"], paths["run"])
+        self.paths = Paths(grids.get("baseline"), grids["forecast"], paths.get("obs"), paths["run"])
         self.regrid = Regrid(**raw.get("regrid", {}))
         self.variables = raw["variables"]
 
@@ -143,12 +155,13 @@ class Leadtimes:
 class Paths:
     grids_baseline: Path
     grids_forecast: Path
+    obs: Path
     run: Path
 
     def __post_init__(self):
-        _force(self, "grids_baseline", Path(self.grids_baseline))
-        _force(self, "grids_forecast", Path(self.grids_forecast))
-        _force(self, "run", Path(self.run))
+        for key in ["grids_baseline", "grids_forecast", "obs", "run"]:
+            if val := getattr(self, key):
+                _force(self, key, Path(val))
 
 
 @dataclass(frozen=True)
@@ -156,8 +169,13 @@ class Regrid:
     method: str = "NEAREST"
     to: str = "forecast"
 
+    # See https://metplus.readthedocs.io/projects/met/en/main_v11.0/Users_Guide/appendixB.html#grids
+    # for information on the "GNNN" grid names accepted as regrid-to values.
+
     def __post_init__(self):
-        _force(self, "to", {"baseline": "OBS", "forecast": "FCST"}[self.to])
+        mapping = {"baseline": "OBS", "forecast": "FCST"}
+        if self.to in mapping:
+            _force(self, "to", mapping[self.to])
 
 
 @dataclass(frozen=True)

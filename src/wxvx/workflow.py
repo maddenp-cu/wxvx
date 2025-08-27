@@ -14,7 +14,6 @@ from warnings import catch_warnings, simplefilter
 import matplotlib as mpl
 
 mpl.use("Agg")
-import jinja2
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -22,11 +21,11 @@ import xarray as xr
 from iotaa import Node, asset, external, task, tasks
 
 from wxvx import variables
-from wxvx.metconf import render
+from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
 from wxvx.times import TimeCoords, gen_validtimes, hh, tcinfo, yyyymmdd
-from wxvx.types import Cycles, Source
-from wxvx.util import LINETYPE, Proximity, atomic, classify_url, mpexec
+from wxvx.types import Cycles, Source, VxType
+from wxvx.util import LINETYPE, Proximity, atomic, classify_url, mpexec, render
 from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, metlevel
 
 if TYPE_CHECKING:
@@ -39,6 +38,7 @@ if TYPE_CHECKING:
 
 @tasks
 def grids(c: Config, baseline: bool = True, forecast: bool = True):
+    baseline = baseline and c.baseline.type == VxType.GRID
     if baseline and not forecast:
         suffix = "{b}"
     elif forecast and not baseline:
@@ -77,6 +77,19 @@ def grids_forecast(c: Config):
 
 
 @tasks
+def obs(c: Config):  # pragma: no cover
+    taskname = "Baseline obs for %s" % c.baseline.name
+    yield taskname
+    reqs = []
+    for tc in gen_validtimes(c.cycles, c.leadtimes):
+        tc_valid = TimeCoords(tc.validtime)
+        yyyymmdd, hh, _ = tcinfo(tc_valid)
+        url = render(c.baseline.url, tc_valid)
+        reqs.append(_local_file_from_http(c.paths.obs / yyyymmdd / hh, url, "prepbufr file"))
+    yield reqs
+
+
+@tasks
 def plots(c: Config):
     taskname = "Plots for %s vs %s" % (c.forecast.name, c.baseline.name)
     yield taskname
@@ -99,6 +112,195 @@ def stats(c: Config):
 
 
 # Private tasks
+
+
+@task
+def _config_grid_stat(
+    c: Config,
+    path: Path,
+    varname: str,
+    rundir: Path,
+    var: Var,
+    prefix: str,
+    source: Source,
+    polyfile: Node | None,
+):
+    taskname = f"Config for grid_stat {path}"
+    yield taskname
+    yield asset(path, path.is_file)
+    yield None
+    level_obs = metlevel(var.level_type, var.level)
+    baseline_class = variables.model_class(c.baseline.name)
+    attrs = {
+        Source.BASELINE: (level_obs, baseline_class.varname(var.name), c.baseline.name),
+        Source.FORECAST: ("(0,0,*,*)", varname, c.forecast.name),
+    }
+    level_fcst, name_fcst, model = attrs[source]
+    field_fcst = {"level": [level_fcst], "name": name_fcst, "set_attr_level": level_obs}
+    field_obs = {"level": [level_obs], "name": baseline_class.varname(var.name)}
+    meta = _meta(c, varname)
+    if meta.cat_thresh:
+        for x in field_fcst, field_obs:
+            x["cat_thresh"] = meta.cat_thresh
+    if meta.cnt_thresh:
+        for x in field_fcst, field_obs:
+            x["cnt_thresh"] = meta.cnt_thresh
+    mask_grid = [] if polyfile else ["FULL"]
+    mask_poly = [polyfile.ref] if polyfile else []
+    config = {
+        "fcst": {
+            "field": [field_fcst],
+        },
+        "mask": {
+            "grid": mask_grid,
+            "poly": mask_poly,
+        },
+        "model": model,
+        "nc_pairs_flag": "FALSE",
+        "obs": {
+            "field": [field_obs],
+        },
+        "obtype": c.baseline.name,
+        "output_flag": dict.fromkeys(sorted({LINETYPE[x] for x in meta.met_stats}), "BOTH"),
+        "output_prefix": f"{prefix}",
+        "regrid": {
+            "method": c.regrid.method,
+            "to_grid": c.regrid.to,
+        },
+        "tmp_dir": rundir,
+    }
+    if nbrhd := {k: v for k, v in [("shape", meta.nbrhd_shape), ("width", meta.nbrhd_width)] if v}:
+        config["nbrhd"] = nbrhd
+    with atomic(path) as tmp:
+        tmp.write_text("%s\n" % render_metconf(config))
+
+
+@task
+def _config_pb2nc(path: Path, rundir: Path):  # pragma: no cover
+    taskname = f"Config for pb2nc {path}"
+    yield taskname
+    yield asset(path, path.is_file)
+    yield None
+    config = {
+        "message_type": [
+            "ADPUPA",
+            "AIRCAR",
+            "AIRCFT",
+        ],
+        "obs_bufr_var": [
+            "D_RH",
+            "QOB",
+            "TOB",
+            "UOB",
+            "VOB",
+            "ZOB",
+        ],
+        "obs_prepbufr_map": {
+            "CEILING": "CEILING",
+            "D_CAPE": "CAPE",
+            "D_MIXR": "MIXR",
+            "D_MLCAPE": "MLCAPE",
+            "D_PBL": "HPBL",
+            "D_RH": "RH",
+            "D_WDIR": "WDIR",
+            "D_WIND": "WIND",
+            "HOVI": "VIS",
+            "MXGS": "GUST",
+            "PMO": "PRMSL",
+            "POB": "PRES",
+            "QOB": "SPFH",
+            "TDO": "DPT",
+            "TOB": "TMP",
+            "TOCC": "TCDC",
+            "UOB": "UGRD",
+            "VOB": "VGRD",
+            "ZOB": "HGT",
+        },
+        "obs_window": {
+            "beg": -1800,
+            "end": 1800,
+        },
+        "quality_mark_thresh": 9,
+        "time_summary": {
+            "step": 3600,
+            "width": 3600,
+            "obs_var": [],
+            "type": [
+                "min",
+                "max",
+                "range",
+                "mean",
+                "stdev",
+                "median",
+                "p80",
+            ],
+        },
+        "tmp_dir": rundir,
+    }
+    with atomic(path) as tmp:
+        tmp.write_text("%s\n" % render_metconf(config))
+
+
+@task
+def _config_point_stat(
+    c: Config, path: Path, varname: str, rundir: Path, var: Var, prefix: str
+):  # pragma: no cover
+    taskname = f"Config for point_stat {path}"
+    yield taskname
+    yield asset(path, path.is_file)
+    yield None
+    level_obs = metlevel(var.level_type, var.level)
+    baseline_class = variables.model_class(c.baseline.name)
+    level_fcst, name_fcst, model = ("(0,0,*,*)", varname, c.forecast.name)
+    field_fcst = {"level": [level_fcst], "name": name_fcst, "set_attr_level": level_obs}
+    field_obs = {"level": [level_obs], "name": baseline_class.varname(var.name)}
+    config = {
+        "fcst": {
+            "field": [field_fcst],
+        },
+        "interp": {
+            "shape": "SQUARE",
+            "type": {
+                "method": "BILIN",
+                "width": 2,
+            },
+            "vld_thresh": 1.0,
+        },
+        "message_type": [
+            "ADPUPA",
+            "AIRCAR",
+            "AIRCFT",
+        ],
+        "message_type_group_map": {
+            "AIRUPA": "ADPUPA,AIRCAR,AIRCFT",
+            "ANYAIR": "AIRCAR,AIRCFT",
+            "ANYSFC": "ADPSFC,SFCSHP,ADPUPA,PROFLR,MSONET",
+            "LANDSF": "ADPSFC,MSONET",
+            "ONLYSF": "ADPSFC,SFCSHP",
+            "SURFACE": "ADPSFC,SFCSHP,MSONET",
+            "WATERSF": "SFCSHP",
+        },
+        "model": model,
+        "obs": {
+            "field": [field_obs],
+        },
+        "obs_window": {
+            "beg": -1800,
+            "end": 1800,
+        },
+        "output_flag": {
+            "cnt": "BOTH",
+        },
+        "output_prefix": f"{prefix}",
+        "regrid": {
+            "method": c.regrid.method,
+            "to_grid": c.regrid.to,
+            "width": 2,
+        },
+        "tmp_dir": rundir,
+    }
+    with atomic(path) as tmp:
+        tmp.write_text("%s\n" % render_metconf(config))
 
 
 @external
@@ -130,7 +332,7 @@ def _grib_index_data(c: Config, outdir: Path, tc: TimeCoords, url: str):
     yield taskname
     idxdata: dict[str, Var] = {}
     yield asset(idxdata, lambda: bool(idxdata))
-    idxfile = _grib_index_file(outdir, url)
+    idxfile = _local_file_from_http(outdir, url, "GRIB index file")
     yield idxfile
     lines = idxfile.ref.read_text(encoding="utf-8").strip().split("\n")
     lines.append(":-1:::::")  # end marker
@@ -148,19 +350,9 @@ def _grib_index_data(c: Config, outdir: Path, tc: TimeCoords, url: str):
 
 
 @task
-def _grib_index_file(outdir: Path, url: str):
-    path = outdir / Path(urlparse(url).path).name
-    taskname = "GRIB index file %s" % path
-    yield taskname
-    yield asset(path, path.is_file)
-    yield None
-    fetch(taskname, url, path)
-
-
-@task
 def _grid_grib(c: Config, tc: TimeCoords, var: Var):
     yyyymmdd, hh, leadtime = tcinfo(tc)
-    url = jinja2.Template(c.baseline.url).render(yyyymmdd=yyyymmdd, hh=hh, fh=int(leadtime))
+    url = render(c.baseline.url, tc)
     proximity, src = classify_url(url)
     if proximity == Proximity.LOCAL:
         assert isinstance(src, Path)
@@ -188,8 +380,7 @@ def _grid_nc(c: Config, varname: str, tc: TimeCoords, var: Var):
     taskname = "Forecast grid %s" % path
     yield taskname
     yield asset(path, path.is_file)
-    rendered = jinja2.Template(c.forecast.path).render(yyyymmdd=yyyymmdd, hh=hh, fh=int(leadtime))
-    fd = _forecast_dataset(Path(rendered))
+    fd = _forecast_dataset(Path(render(c.forecast.path, tc)))
     yield fd
     src = da_select(c, fd.ref, varname, tc, var)
     da = da_construct(c, src)
@@ -200,14 +391,31 @@ def _grid_nc(c: Config, varname: str, tc: TimeCoords, var: Var):
 
 
 @task
-def _polyfile(path: Path, mask: tuple[tuple[float, float]]):
-    taskname = "Poly file %s" % path
+def _local_file_from_http(outdir: Path, url: str, desc: str):
+    path = outdir / Path(urlparse(url).path).name
+    taskname = "%s %s" % (desc, path)
     yield taskname
     yield asset(path, path.is_file)
     yield None
-    content = "MASK\n%s\n" % "\n".join(f"{lat} {lon}" for lat, lon in mask)
-    with atomic(path) as tmp:
-        tmp.write_text(content)
+    fetch(taskname, url, path)
+
+
+@task
+def _netcdf_from_obs(c: Config, tc: TimeCoords):  # pragma: no cover
+    yyyymmdd, hh, _ = tcinfo(tc)
+    taskname = "netCDF from prepbufr at %s %sZ" % (yyyymmdd, hh)
+    yield taskname
+    rundir = c.paths.run / "obs" / yyyymmdd / hh
+    url = render(c.baseline.url, tc)
+    path = (rundir / url.split("/")[-1]).with_suffix(".nc")
+    yield asset(path, path.is_file)
+    config = _config_pb2nc(path.with_suffix(".config"), rundir)
+    prepbufr = _local_file_from_http(c.paths.obs / yyyymmdd / hh, url, "prepbufr file")
+    yield [config, prepbufr]
+    runscript = path.with_suffix(".sh")
+    content = f"pb2nc -v 4 {prepbufr.ref} {path} {config.ref} >{path.stem}.log 2>&1"
+    _write_runscript(runscript, content)
+    mpexec(str(runscript), rundir, taskname)
 
 
 @task
@@ -245,10 +453,21 @@ def _plot(
 
 
 @task
-def _stat(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source: Source):
+def _polyfile(path: Path, mask: tuple[tuple[float, float]]):
+    taskname = "Poly file %s" % path
+    yield taskname
+    yield asset(path, path.is_file)
+    yield None
+    content = "MASK\n%s\n" % "\n".join(f"{lat} {lon}" for lat, lon in mask)
+    with atomic(path) as tmp:
+        tmp.write_text(content)
+
+
+@task
+def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source: Source):
     yyyymmdd, hh, leadtime = tcinfo(tc)
     source_name = {Source.BASELINE: "baseline", Source.FORECAST: "forecast"}[source]
-    taskname = "MET stats for %s %s at %s %sZ %s" % (source_name, var, yyyymmdd, hh, leadtime)
+    taskname = "Stats vs grid for %s %s at %s %sZ %s" % (source_name, var, yyyymmdd, hh, leadtime)
     yield taskname
     rundir = c.paths.run / "stats" / yyyymmdd / hh / leadtime
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
@@ -256,77 +475,53 @@ def _stat(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
     yield asset(path, path.is_file)
     baseline = _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var)
-    forecast = _grid_nc(c, varname, tc, var)
-    toverify = _grid_grib(c, tc, var) if source == Source.BASELINE else forecast
-    log = f"{path.stem}.log"
-    reqs = [toverify, baseline]
-    if source == Source.BASELINE:
-        reqs.append(forecast)
+    forecast = (
+        _grid_grib(c, tc, var) if source == Source.BASELINE else _grid_nc(c, varname, tc, var)
+    )
+    reqs = [baseline, forecast]
     polyfile = None
     if mask := c.forecast.mask:
         polyfile = _polyfile(c.paths.run / "stats" / "mask.poly", mask)
         reqs.append(polyfile)
+    path_config = path.with_suffix(".config")
+    config = _config_grid_stat(c, path_config, varname, rundir, var, prefix, source, polyfile)
+    reqs.append(config)
     yield reqs
-    cfgfile = path.with_suffix(".config")
-    _grid_stat_config(c, cfgfile, varname, rundir, var, prefix, source, polyfile)
     runscript = path.with_suffix(".sh")
     content = f"""
     export OMP_NUM_THREADS=1
-    grid_stat -v 4 {toverify.ref} {baseline.ref} {cfgfile} >{log} 2>&1
+    grid_stat -v 4 {forecast.ref} {baseline.ref} {config.ref} >{path.stem}.log 2>&1
     """
-    with atomic(runscript) as tmp:
-        tmp.write_text("#!/usr/bin/env bash\n\n%s\n" % dedent(content).strip())
-    runscript.chmod(runscript.stat().st_mode | S_IEXEC)
+    _write_runscript(runscript, content)
+    mpexec(str(runscript), rundir, taskname)
+
+
+@task
+def _stats_vs_obs(
+    c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source: Source
+):  # pragma: no cover
+    yyyymmdd, hh, leadtime = tcinfo(tc)
+    source_name = {Source.BASELINE: "baseline", Source.FORECAST: "forecast"}[source]
+    taskname = "Stats vs obs for %s %s at %s %sZ %s" % (source_name, var, yyyymmdd, hh, leadtime)
+    yield taskname
+    rundir = c.paths.run / "stats" / yyyymmdd / hh / leadtime
+    template = "point_stat_%s_%02d0000L_%s_%s0000V.stat"
+    yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
+    path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
+    yield asset(path, path.is_file)
+    forecast = _grid_nc(c, varname, tc, var)
+    obs = _netcdf_from_obs(c, TimeCoords(tc.validtime))
+    config = _config_point_stat(c, path.with_suffix(".config"), varname, rundir, var, prefix)
+    yield [forecast, obs, config]
+    runscript = path.with_suffix(".sh")
+    content = "point_stat -v 4 {forecast} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
+        forecast=forecast.ref, obs=obs.ref, config=config.ref, rundir=rundir, log=f"{path.stem}.log"
+    )
+    _write_runscript(runscript, content)
     mpexec(str(runscript), rundir, taskname)
 
 
 # Support
-
-
-def _grid_stat_config(
-    c: Config,
-    path: Path,
-    varname: str,
-    rundir: Path,
-    var: Var,
-    prefix: str,
-    source: Source,
-    polyfile: Node | None,
-):
-    level_obs = metlevel(var.level_type, var.level)
-    baseline_class = variables.model_class(c.baseline.name)
-    attrs = {
-        Source.BASELINE: (level_obs, baseline_class.varname(var.name), c.baseline.name),
-        Source.FORECAST: ("(0,0,*,*)", varname, c.forecast.name),
-    }
-    level_fcst, name_fcst, model = attrs[source]
-    field_fcst = {"level": [level_fcst], "name": name_fcst, "set_attr_level": level_obs}
-    field_obs = {"level": [level_obs], "name": baseline_class.varname(var.name)}
-    meta = _meta(c, varname)
-    if meta.cat_thresh:
-        for x in field_fcst, field_obs:
-            x["cat_thresh"] = meta.cat_thresh
-    if meta.cnt_thresh:
-        for x in field_fcst, field_obs:
-            x["cnt_thresh"] = meta.cnt_thresh
-    mask_grid = [] if polyfile else ["FULL"]
-    mask_poly = [polyfile.ref] if polyfile else []
-    config = {
-        "fcst": {"field": [field_fcst]},
-        "mask": {"grid": mask_grid, "poly": mask_poly},
-        "model": model,
-        "nc_pairs_flag": "FALSE",
-        "obs": {"field": [field_obs]},
-        "obtype": c.baseline.name,
-        "output_flag": dict.fromkeys(sorted({LINETYPE[x] for x in meta.met_stats}), "BOTH"),
-        "output_prefix": f"{prefix}",
-        "regrid": {"method": c.regrid.method, "to_grid": c.regrid.to},
-        "tmp_dir": rundir,
-    }
-    if nbrhd := {k: v for k, v in [("shape", meta.nbrhd_shape), ("width", meta.nbrhd_width)] if v}:
-        config["nbrhd"] = nbrhd
-    with atomic(path) as tmp:
-        tmp.write_text("%s\n" % render(config))
 
 
 def _meta(c: Config, varname: str) -> VarMeta:
@@ -376,7 +571,8 @@ def _statargs(
 def _statreqs(
     c: Config, varname: str, level: float | None, cycle: datetime | None = None
 ) -> Sequence[Node]:
-    genreqs = lambda source: [_stat(*args) for args in _statargs(c, varname, level, source, cycle)]
+    f = _stats_vs_obs if c.baseline.type == VxType.POINT else _stats_vs_grid
+    genreqs = lambda source: [f(*args) for args in _statargs(c, varname, level, source, cycle)]
     reqs: Sequence[Node] = genreqs(Source.FORECAST)
     if c.baseline.compare:
         reqs = [*reqs, *genreqs(Source.BASELINE)]
@@ -413,3 +609,9 @@ def _vxvars(c: Config) -> dict[Var, str]:
         for varname, attrs in c.variables.items()
         for level in attrs.get("levels", [None])
     }
+
+
+def _write_runscript(path: Path, content: str) -> None:
+    with atomic(path) as tmp:
+        tmp.write_text("#!/usr/bin/env bash\n\n%s\n" % dedent(content).strip())
+    path.chmod(path.stat().st_mode | S_IEXEC)

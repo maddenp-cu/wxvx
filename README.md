@@ -37,6 +37,7 @@ An overview of the content of the YAML configuration file specified via `-c` / `
 │ baseline:          │ Description of the baseline dataset       │
 │   compare:         │   Verify and/or plot forecast?            │
 │   name:            │   Dataset descriptive name                │
+│   type:            │   Either 'grid' or 'point'                │
 │   url:             │   Template for baseline GRIB location     │
 │ cycles:            │ Cycles to verify                          │
 │   start:           │   First cycle                             │
@@ -76,6 +77,18 @@ An overview of the content of the YAML configuration file specified via `-c` / `
 └────────────────────┴───────────────────────────────────────────┘
 ```
 
+### baseline.name
+
+Name of the baseline to verify against. Currently supported values are: `GFS`, `HRRR`, `PREPBUFR`. This value guides `wxvx` in identification of baseline data (grids or obs) corresponding to the forecast variable being verified. This name will also appear in MET stat output.
+
+### baseline.type
+
+One of `grid` or `point`.
+
+For `grid`, `url` should point to GRIB data, and `compare` and `name` are required.
+
+For `point`, `url` should point to prepbufr data, and `compare` and `name` should not be specified.
+
 ### baseline.url
 
 The `baseline.url` value may include Jinja2 expressions, processed at run-time with [`jinja2.Tremplate.render()`](https://jinja.palletsprojects.com/en/stable/api/#jinja2.Template.render). Variables `yyyymmdd` (cycle date, a `str`), `hh` (cycle time, a `str`), and `fh` (forecast hour, aka leadtime, an `int`) will be supplied by `wxvx`.
@@ -114,6 +127,10 @@ If a variable specified under `forecast.coords.time` names a coordinate dimensio
 ### forecast.mask
 
 The `forecast.mask` value may be omitted, or set to the YAML value `null`, in which case no masking will be applied.
+
+### forecast.name
+
+An arbitrary value identifying the forecast model being verified. This name will appear in MET stat output.
 
 ### forecast.path
 
