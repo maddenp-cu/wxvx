@@ -319,6 +319,14 @@ This will create and activate a conda virtual environment named `DEV-wxvx`, wher
 
 When you are finished, type `exit` to return to your previous shell. The `DEV-wxvx` environment will still exist, and a future `make devshell` command will more-or-less instantly activate it again.
 
+### Updating Version / Build Numbers
+
+To update the version or build number:
+
+1. Edit `src/wxvx/resources/info.json` appropriately. When updating the version number, reset the build number to `0`.
+2. In a `base` conda environment with the `condev` package installed (see above), run `make meta`. This will update the `recipe/meta.*` files.
+3. Commit these changes.
+
 ## Cookbook
 
 ### Extract Grid Projection from GRIB
