@@ -1,6 +1,6 @@
 # wxvx
 
-A workflow tool for weather-model verification, leveraging [`uwtools`](https://github.com/ufs-community/uwtools) to drive [MET](https://github.com/dtcenter/MET) and [METplus](https://github.com/dtcenter/METplus).
+A workflow tool for weather-model verification, leveraging [`uwtools`](https://github.com/ufs-community/uwtools) to drive [MET](https://github.com/dtcenter/MET).
 
 ## Installation
 
@@ -24,7 +24,7 @@ conda activate wxvx
 wxvx --version
 ```
 
-The activated virtual environment includes the [`met2go`](https://github.com/maddenp-cu/met2go) package, which provides [MET](https://github.com/dtcenter/MET) and select [METplus](https://github.com/dtcenter/METplus) executables and data files. See the `met2go` [docs](https://github.com/maddenp-cu/met2go/blob/main/README.md) for more information.
+The activated virtual environment includes the [`met2go`](https://github.com/maddenp-cu/met2go) package, which provides [MET](https://github.com/dtcenter/MET), select [METplus](https://github.com/dtcenter/METplus) executables, and data files. See the `met2go` [docs](https://github.com/maddenp-cu/met2go/blob/main/README.md) for more information.
 
 ## Configuration
 
