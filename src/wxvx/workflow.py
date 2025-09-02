@@ -25,7 +25,7 @@ from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
 from wxvx.times import TimeCoords, gen_validtimes, hh, tcinfo, yyyymmdd
 from wxvx.types import Cycles, Source, VxType
-from wxvx.util import LINETYPE, Proximity, atomic, classify_url, mpexec, render
+from wxvx.util import LINETYPE, Proximity, WXVXError, atomic, classify_url, mpexec, render
 from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, metlevel
 
 if TYPE_CHECKING:
@@ -119,7 +119,6 @@ def _config_grid_stat(
     c: Config,
     path: Path,
     varname: str,
-    rundir: Path,
     var: Var,
     prefix: str,
     source: Source,
@@ -167,7 +166,7 @@ def _config_grid_stat(
             "method": c.regrid.method,
             "to_grid": c.regrid.to,
         },
-        "tmp_dir": rundir,
+        "tmp_dir": path.parent,
     }
     if nbrhd := {k: v for k, v in [("shape", meta.nbrhd_shape), ("width", meta.nbrhd_width)] if v}:
         config["nbrhd"] = nbrhd
@@ -176,46 +175,31 @@ def _config_grid_stat(
 
 
 @task
-def _config_pb2nc(path: Path, rundir: Path):  # pragma: no cover
+def _config_pb2nc(c: Config, path: Path):  # pragma: no cover
     taskname = f"Config for pb2nc {path}"
     yield taskname
     yield asset(path, path.is_file)
     yield None
-    config = {
+    # Specify the union of values needed by either sfc or atm vx and let point_stat restrict its
+    # selection of obs from the netCDF file created by pb2nc.
+    config: dict = {
+        "mask": {
+            "grid": c.regrid.to or "FULL",
+        },
         "message_type": [
+            "ADPSFC",
             "ADPUPA",
             "AIRCAR",
             "AIRCFT",
         ],
         "obs_bufr_var": [
-            "D_RH",
+            "POB",
             "QOB",
             "TOB",
             "UOB",
             "VOB",
             "ZOB",
         ],
-        "obs_prepbufr_map": {
-            "CEILING": "CEILING",
-            "D_CAPE": "CAPE",
-            "D_MIXR": "MIXR",
-            "D_MLCAPE": "MLCAPE",
-            "D_PBL": "HPBL",
-            "D_RH": "RH",
-            "D_WDIR": "WDIR",
-            "D_WIND": "WIND",
-            "HOVI": "VIS",
-            "MXGS": "GUST",
-            "PMO": "PRMSL",
-            "POB": "PRES",
-            "QOB": "SPFH",
-            "TDO": "DPT",
-            "TOB": "TMP",
-            "TOCC": "TCDC",
-            "UOB": "UGRD",
-            "VOB": "VGRD",
-            "ZOB": "HGT",
-        },
         "obs_window": {
             "beg": -1800,
             "end": 1800,
@@ -235,7 +219,7 @@ def _config_pb2nc(path: Path, rundir: Path):  # pragma: no cover
                 "p80",
             ],
         },
-        "tmp_dir": rundir,
+        "tmp_dir": path.parent,
     }
     with atomic(path) as tmp:
         tmp.write_text("%s\n" % render_metconf(config))
@@ -243,7 +227,7 @@ def _config_pb2nc(path: Path, rundir: Path):  # pragma: no cover
 
 @task
 def _config_point_stat(
-    c: Config, path: Path, varname: str, rundir: Path, var: Var, prefix: str
+    c: Config, path: Path, varname: str, var: Var, prefix: str
 ):  # pragma: no cover
     taskname = f"Config for point_stat {path}"
     yield taskname
@@ -254,6 +238,12 @@ def _config_point_stat(
     level_fcst, name_fcst, model = ("(0,0,*,*)", varname, c.forecast.name)
     field_fcst = {"level": [level_fcst], "name": name_fcst, "set_attr_level": level_obs}
     field_obs = {"level": [level_obs], "name": baseline_class.varname(var.name)}
+    surface = var.level_type in ("heightAboveGround", "surface")
+    try:
+        regrid_width = {"BILIN": 2, "NEAREST": 1}[c.regrid.method]
+    except KeyError as e:
+        msg = "Could not determine 'width' value for regrid method %s" % c.regrid.method
+        raise WXVXError(msg) from e
     config = {
         "fcst": {
             "field": [field_fcst],
@@ -266,15 +256,18 @@ def _config_point_stat(
             },
             "vld_thresh": 1.0,
         },
-        "message_type": ["AIRUPA"],
-        "message_type_group_map": {"AIRUPA": "ADPUPA,AIRCAR,AIRCFT"},
+        "message_type": ["SFC" if surface else "ATM"],
+        "message_type_group_map": {
+            "ATM": "ADPUPA,AIRCAR,AIRCFT",
+            "SFC": "ADPSFC",
+        },
         "model": model,
         "obs": {
             "field": [field_obs],
         },
         "obs_window": {
-            "beg": -1800,
-            "end": 1800,
+            "beg": -900 if surface else -1800,
+            "end": 900 if surface else 1800,
         },
         "output_flag": {
             "cnt": "BOTH",
@@ -283,9 +276,9 @@ def _config_point_stat(
         "regrid": {
             "method": c.regrid.method,
             "to_grid": c.regrid.to,
-            "width": 2,
+            "width": regrid_width,
         },
-        "tmp_dir": rundir,
+        "tmp_dir": path.parent,
     }
     with atomic(path) as tmp:
         tmp.write_text("%s\n" % render_metconf(config))
@@ -393,14 +386,14 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):  # pragma: no cover
     yyyymmdd, hh, _ = tcinfo(tc)
     taskname = "netCDF from prepbufr at %s %sZ" % (yyyymmdd, hh)
     yield taskname
-    rundir = c.paths.run / "obs" / yyyymmdd / hh
     url = render(c.baseline.url, tc)
-    path = (rundir / url.split("/")[-1]).with_suffix(".nc")
+    path = (c.paths.obs / yyyymmdd / hh / url.split("/")[-1]).with_suffix(".nc")
     yield asset(path, path.is_file)
-    config = _config_pb2nc(path.with_suffix(".config"), rundir)
-    prepbufr = _local_file_from_http(c.paths.obs / yyyymmdd / hh, url, "prepbufr file")
+    rundir = c.paths.run / "stats" / yyyymmdd / hh
+    config = _config_pb2nc(c, rundir / path.with_suffix(".config").name)
+    prepbufr = _local_file_from_http(path.parent, url, "prepbufr file")
     yield [config, prepbufr]
-    runscript = path.with_suffix(".sh")
+    runscript = config.ref.with_suffix(".sh")
     content = f"pb2nc -v 4 {prepbufr.ref} {path} {config.ref} >{path.stem}.log 2>&1"
     _write_runscript(runscript, content)
     mpexec(str(runscript), rundir, taskname)
@@ -472,7 +465,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
         polyfile = _polyfile(c.paths.run / "stats" / "mask.poly", mask)
         reqs.append(polyfile)
     path_config = path.with_suffix(".config")
-    config = _config_grid_stat(c, path_config, varname, rundir, var, prefix, source, polyfile)
+    config = _config_grid_stat(c, path_config, varname, var, prefix, source, polyfile)
     reqs.append(config)
     yield reqs
     runscript = path.with_suffix(".sh")
@@ -499,7 +492,7 @@ def _stats_vs_obs(
     yield asset(path, path.is_file)
     forecast = _grid_nc(c, varname, tc, var)
     obs = _netcdf_from_obs(c, TimeCoords(tc.validtime))
-    config = _config_point_stat(c, path.with_suffix(".config"), varname, rundir, var, prefix)
+    config = _config_point_stat(c, path.with_suffix(".config"), varname, var, prefix)
     yield [forecast, obs, config]
     runscript = path.with_suffix(".sh")
     content = "point_stat -v 4 {forecast} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
