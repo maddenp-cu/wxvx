@@ -77,7 +77,7 @@ def grids_forecast(c: Config):
 
 
 @tasks
-def obs(c: Config):  # pragma: no cover
+def obs(c: Config):
     taskname = "Baseline obs for %s" % c.baseline.name
     yield taskname
     reqs = []
@@ -175,7 +175,7 @@ def _config_grid_stat(
 
 
 @task
-def _config_pb2nc(c: Config, path: Path):  # pragma: no cover
+def _config_pb2nc(c: Config, path: Path):
     taskname = f"Config for pb2nc {path}"
     yield taskname
     yield asset(path, path.is_file)
@@ -226,9 +226,7 @@ def _config_pb2nc(c: Config, path: Path):  # pragma: no cover
 
 
 @task
-def _config_point_stat(
-    c: Config, path: Path, varname: str, var: Var, prefix: str
-):  # pragma: no cover
+def _config_point_stat(c: Config, path: Path, varname: str, var: Var, prefix: str):
     taskname = f"Config for point_stat {path}"
     yield taskname
     yield asset(path, path.is_file)
@@ -242,7 +240,7 @@ def _config_point_stat(
     try:
         regrid_width = {"BILIN": 2, "NEAREST": 1}[c.regrid.method]
     except KeyError as e:
-        msg = "Could not determine 'width' value for regrid method %s" % c.regrid.method
+        msg = "Could not determine 'width' value for regrid method '%s'" % c.regrid.method
         raise WXVXError(msg) from e
     config = {
         "fcst": {
@@ -382,7 +380,7 @@ def _local_file_from_http(outdir: Path, url: str, desc: str):
 
 
 @task
-def _netcdf_from_obs(c: Config, tc: TimeCoords):  # pragma: no cover
+def _netcdf_from_obs(c: Config, tc: TimeCoords):
     yyyymmdd, hh, _ = tcinfo(tc)
     taskname = "netCDF from prepbufr at %s %sZ" % (yyyymmdd, hh)
     yield taskname
@@ -390,11 +388,11 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):  # pragma: no cover
     path = (c.paths.obs / yyyymmdd / hh / url.split("/")[-1]).with_suffix(".nc")
     yield asset(path, path.is_file)
     rundir = c.paths.run / "stats" / yyyymmdd / hh
-    config = _config_pb2nc(c, rundir / path.with_suffix(".config").name)
+    cfgfile = _config_pb2nc(c, rundir / path.with_suffix(".config").name)
     prepbufr = _local_file_from_http(path.parent, url, "prepbufr file")
-    yield [config, prepbufr]
-    runscript = config.ref.with_suffix(".sh")
-    content = f"pb2nc -v 4 {prepbufr.ref} {path} {config.ref} >{path.stem}.log 2>&1"
+    yield {"cfgfile": cfgfile, "prepbufr": prepbufr}
+    runscript = cfgfile.ref.with_suffix(".sh")
+    content = f"pb2nc -v 4 {prepbufr.ref} {path} {cfgfile.ref} >{path.stem}.log 2>&1"
     _write_runscript(runscript, content)
     mpexec(str(runscript), rundir, taskname)
 
@@ -478,9 +476,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
 
 
 @task
-def _stats_vs_obs(
-    c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source: Source
-):  # pragma: no cover
+def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source: Source):
     yyyymmdd, hh, leadtime = tcinfo(tc)
     source_name = {Source.BASELINE: "baseline", Source.FORECAST: "forecast"}[source]
     taskname = "Stats vs obs for %s %s at %s %sZ %s" % (source_name, var, yyyymmdd, hh, leadtime)
