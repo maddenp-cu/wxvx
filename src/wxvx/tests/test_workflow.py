@@ -109,28 +109,14 @@ def test_workflow_grids_forecast(c, fmt, n_grids, noop):
         assert len(workflow.grids_forecast(c=c).ref) == n_grids
 
 
-def test_workflow_obs(c):
-    url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
-    c.baseline = replace(c.baseline, type="point", url=url)
-    expected = [
-        c.paths.obs / yyyymmdd / hh / f"gdas.{yyyymmdd}.t{hh}z.prepbufr.nr"
-        for (yyyymmdd, hh) in [
-            ("20241219", "18"),
-            ("20241220", "00"),
-            ("20241220", "06"),
-            ("20241220", "12"),
-            ("20241220", "18"),
-        ]
-    ]
-    assert workflow.obs(c).ref == expected
+def test_workflow_ncobs(c, obs_info):
+    c, expected = obs_info
+    assert workflow.ncobs(c).ref == [x.with_suffix(".nc") for x in expected]
 
 
-def test_workflow_obs__bad_baseline_type(c):
-    c.baseline = replace(c.baseline, type="grid")
-    with raises(WXVXError) as e:
-        workflow.obs(c)
-    expected = "This task requires that config value baseline.type be set to 'point'"
-    assert expected in str(e.value)
+def test_workflow_obs(c, obs_info):
+    c, expected = obs_info
+    assert workflow.obs(c).ref == [x.with_suffix(".nr") for x in expected]
 
 
 def test_workflow_plots(c, noop):
@@ -636,6 +622,14 @@ def test_workflow__stats_vs_obs(c, fakefs, fmt, tc, testvars):
 # Support Tests
 
 
+def test_workflow__enforce_point_baseline_type(c):
+    c.baseline = replace(c.baseline, type="grid")
+    with raises(WXVXError) as e:
+        workflow._enforce_point_baseline_type(c=c, taskname="foo")
+    expected = "foo: This task requires that config value baseline.type be set to 'point'"
+    assert str(e.value) == expected
+
+
 def test_workflow__meta(c):
     meta = workflow._meta(c=c, varname="HGT")
     assert meta.cf_standard_name == "geopotential_height"
@@ -815,6 +809,23 @@ def noop():
         yield asset(None, lambda: False)
 
     return noop
+
+
+@fixture
+def obs_info(c):
+    url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
+    c.baseline = replace(c.baseline, type="point", url=url)
+    expected = [
+        c.paths.obs / yyyymmdd / hh / f"gdas.{yyyymmdd}.t{hh}z.prepbufr.x"
+        for (yyyymmdd, hh) in [
+            ("20241219", "18"),
+            ("20241220", "00"),
+            ("20241220", "06"),
+            ("20241220", "12"),
+            ("20241220", "18"),
+        ]
+    ]
+    return c, expected
 
 
 @fixture
