@@ -142,6 +142,7 @@ def stats(c: Config):
 def _config_grid_stat(
     c: Config,
     path: Path,
+    source: Source,
     varname: str,
     var: Var,
     prefix: str,
@@ -157,7 +158,7 @@ def _config_grid_stat(
     config = {
         "fcst": {"field": [field_fcst]},
         "mask": {"grid": [] if polyfile else ["FULL"], "poly": [polyfile.ref] if polyfile else []},
-        "model": c.forecast.name,
+        "model": c.baseline.name if source == Source.BASELINE else c.forecast.name,
         "nc_pairs_flag": "FALSE",
         "obs": {"field": [field_obs]},
         "obtype": c.baseline.name,
@@ -196,7 +197,7 @@ def _config_pb2nc(c: Config, path: Path):
 
 @task
 def _config_point_stat(
-    c: Config, path: Path, varname: str, var: Var, prefix: str, datafmt: DataFormat
+    c: Config, path: Path, source: Source, varname: str, var: Var, prefix: str, datafmt: DataFormat
 ):
     taskname = f"Config for point_stat {path}"
     yield taskname
@@ -209,7 +210,7 @@ def _config_point_stat(
         "interp": {"shape": "SQUARE", "type": {"method": "BILIN", "width": 2}, "vld_thresh": 1.0},
         "message_type": ["SFC" if surface else "ATM"],
         "message_type_group_map": {"ATM": "ADPUPA,AIRCAR,AIRCFT", "SFC": "ADPSFC"},
-        "model": c.forecast.name,
+        "model": c.baseline.name if source == Source.BASELINE else c.forecast.name,
         "obs": {"field": [field_obs]},
         "obs_window": {"beg": -900 if surface else -1800, "end": 900 if surface else 1800},
         "output_flag": {"cnt": "BOTH"},
@@ -416,7 +417,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
         polyfile = _polyfile(c.paths.run / "stats" / "mask.poly", mask)
         reqs.append(polyfile)
     path_config = path.with_suffix(".config")
-    config = _config_grid_stat(c, path_config, varname, var, prefix, datafmt, polyfile)
+    config = _config_grid_stat(c, path_config, source, varname, var, prefix, datafmt, polyfile)
     reqs.append(config)
     yield reqs
     runscript = path.with_suffix(".sh")
@@ -442,7 +443,9 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
     forecast_path = Path(render(c.forecast.path, tc, context=c.raw))
     forecast, datafmt = _req_grid(forecast_path, c, varname, tc, var)
     obs = _netcdf_from_obs(c, TimeCoords(tc.validtime))
-    config = _config_point_stat(c, path.with_suffix(".config"), varname, var, prefix, datafmt)
+    config = _config_point_stat(
+        c, path.with_suffix(".config"), source, varname, var, prefix, datafmt
+    )
     yield [forecast, obs, config]
     runscript = path.with_suffix(".sh")
     content = "point_stat -v 4 {forecast} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
