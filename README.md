@@ -28,7 +28,7 @@ The activated virtual environment includes the [`met2go`](https://github.com/mad
 
 ## Configuration
 
-An overview of the content of the YAML configuration file specified via `-c` / `--config` is described in the table below. See the subsections below for more detailed information. Use the `-s` / `--show` CLI switch to show a pro-forma config with sample values for reference.
+An overview of the content of the YAML configuration file specified via `-c` / `--config` is described in the table below. See the subsections below for more detailed information.
 
 ```
 ┌────────────────────┬───────────────────────────────────────────┐
@@ -202,14 +202,14 @@ Some values may include Jinja2 expressions, processed at run-time with [`jinja2.
 
 ```
 $ wxvx --help
-usage: wxvx [-c FILE] [-t [TASK]] [-d] [-h] [-k] [-l] [-n N] [-s] [-v]
+usage: wxvx [-c FILE] [-t TASK] [-d] [-h] [-k] [-l] [-n N] [-s] [-v]
 
 wxvx
 
 Required arguments:
   -c, --config FILE
       Configuration file
-  -t, --task [TASK]
+  -t, --task TASK
       Task to execute
 
 Optional arguments:
@@ -224,7 +224,7 @@ Optional arguments:
   -n, --threads N
       Number of threads
   -s, --show
-      Show a pro-forma config and exit
+      Show the realized config and exit
   -v, --version
       Show version and exit
 ```

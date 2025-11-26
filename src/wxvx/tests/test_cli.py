@@ -12,7 +12,6 @@ from unittest.mock import patch
 import yaml
 from pytest import mark, raises
 
-import wxvx
 from wxvx import cli
 from wxvx.types import Config
 from wxvx.util import WXVXError, pkgname, resource_path
@@ -51,15 +50,18 @@ def test_cli_main__bad_config(fakefs, fs):
 
 
 @mark.parametrize("switch", ["-k", "--check"])
-def test_cli_main__check_config(fs, switch):
+@mark.parametrize("truthtype", ["grid", "point"])
+def test_cli_main__check_config(fs, switch, truthtype):
+    fn = "config-%s.yaml" % truthtype
     fs.add_real_file(resource_path("config.jsonschema"))
-    fs.add_real_file(resource_path("config-grid.yaml"))
     fs.add_real_file(resource_path("info.json"))
-    argv = [pkgname, switch, "-c", str(resource_path("config-grid.yaml")), "-t", "grids"]
+    fs.add_real_file(resource_path(fn))
+    argv = [pkgname, switch, "-c", str(resource_path(fn)), "-t", "grids"]
     with (
         patch.object(cli.sys, "argv", argv),
         patch.object(cli, "tasknames", return_value=["grids"]),
         patch.object(cli.workflow, "grids") as grids,
+        raises(SystemExit),
     ):
         cli.main()
     grids.assert_not_called()
@@ -96,6 +98,21 @@ def test_cli_main__task_list(caplog, switch, tidy):
           stats
         """
         assert re.sub(r"INFO     [^ ]+ ", "", caplog.text.strip()) == tidy(expected)
+
+
+@mark.parametrize("check", [True, False])
+@mark.parametrize("switch", ["-s", "--show"])
+def test_cli_main__show_config(capsys, check, fs, switch):
+    fn = "config-grid.yaml"
+    fs.add_real_file(resource_path("config.jsonschema"))
+    fs.add_real_file(resource_path("info.json"))
+    fs.add_real_file(resource_path(fn))
+    argv = [pkgname, switch, "-c", str(resource_path(fn))]
+    if check:
+        argv.append("--check")
+    with patch.object(cli.sys, "argv", argv), raises(SystemExit):
+        cli.main()
+    assert isinstance(yaml.safe_load(capsys.readouterr().out), dict)
 
 
 def test_cli_main__task_missing(caplog):
@@ -154,27 +171,12 @@ def test_cli__parse_args__threads_bad(capsys, n):
 
 
 def test_cli__process_args__bad_task(logged):
-    kwargs = dict(check=False, config=Path("/some/path"), list=False, task="foo")
+    kwargs = dict(check=False, config=Path("/some/path"), list=False, show=False, task="foo")
     with patch.object(cli, "_show_tasks") as _show_tasks, raises(SystemExit) as e:
         cli._process_args(args=Namespace(**kwargs))
     assert e.value.code == 1
     _show_tasks.assert_called_once_with()
     assert logged("No such task: foo")
-
-
-def test_cli__process_args__check_only():
-    args = Namespace(check=True, config=Path("/some/path"), list=False)
-    with patch.object(cli, "_show_tasks") as _show_tasks:
-        cli._process_args(args=args)
-    _show_tasks.assert_not_called()
-
-
-def test_cli__process_args__list_only():
-    args = Namespace(check=False, list=True)
-    with patch.object(cli, "_show_tasks") as _show_tasks, raises(SystemExit) as e:
-        cli._process_args(args=args)
-    assert e.value.code == 0
-    _show_tasks.assert_called_once_with()
 
 
 def test_cli__process_args__list_and_check():
@@ -192,16 +194,27 @@ def test_cli__process_args__no_config(logged):
     assert logged("No configuration file specified")
 
 
+def test_cli__process_args__only_check():
+    args = Namespace(check=True, config=Path("/some/path"), list=False, show=False)
+    with patch.object(cli, "_show_tasks") as _show_tasks:
+        cli._process_args(args=args)
+    _show_tasks.assert_not_called()
+
+
+def test_cli__process_args__only_list():
+    args = Namespace(check=False, list=True, show=False)
+    with patch.object(cli, "_show_tasks") as _show_tasks, raises(SystemExit) as e:
+        cli._process_args(args=args)
+    assert e.value.code == 0
+    _show_tasks.assert_called_once_with()
+
+
+def test_cli__process_args__only_show():
+    args = Namespace(check=True, config=Path("/some/path"), list=False, show=True)
+    with patch.object(cli, "_show_tasks") as _show_tasks:
+        cli._process_args(args=args)
+    _show_tasks.assert_not_called()
+
+
 def test_cli__version():
     assert re.match(r"^version \d+\.\d+\.\d+ build \d+$", cli._version())
-
-
-def test_cli_ShowConfig(capsys, fs):
-    msg = "testing ShowConfig"
-    cf = Path(fs.create_file("config.yaml", contents=msg).path)
-    sc = cli.ShowConfig(option_strings=["-s", "--show"], dest="show")
-    with patch.object(wxvx.util, "resource_path", return_value=cf):
-        with raises(SystemExit) as e:
-            sc(None, None, None)
-        assert e.value.code == 0
-    assert capsys.readouterr().out.strip() == msg

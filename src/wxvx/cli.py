@@ -2,10 +2,11 @@ import json
 import logging
 import sys
 import traceback
-from argparse import Action, ArgumentParser, ArgumentTypeError, HelpFormatter, Namespace
+from argparse import ArgumentParser, ArgumentTypeError, HelpFormatter, Namespace
 from pathlib import Path
 
 from iotaa import tasknames
+from uwtools.api.config import get_yaml_config
 from uwtools.api.logging import use_uwtools_logger
 
 from wxvx import workflow
@@ -20,11 +21,18 @@ def main() -> None:
         args = _parse_args(sys.argv)
         use_uwtools_logger(verbose=args.debug)
         _process_args(args)
-        c = validated_config(args.config)
-        if not args.check:
-            logging.info("Preparing task graph for %s", args.task)
-            task = getattr(workflow, args.task)
-            task(c, threads=args.threads)
+        yc = get_yaml_config(args.config)
+        yc.dereference()
+        if args.show:
+            yc.dump()
+            if not args.check:
+                sys.exit(0)
+        c = validated_config(yc)
+        if args.check:
+            sys.exit(0)
+        logging.info("Preparing task graph for %s", args.task)
+        task = getattr(workflow, args.task)
+        task(c, threads=args.threads)
     except WXVXError as e:
         for line in traceback.format_exc().strip().split("\n"):
             logging.debug(line)
@@ -64,7 +72,6 @@ def _parse_args(argv: list[str]) -> Namespace:
         "--task",
         help="Task to execute",
         metavar="TASK",
-        default=None,
     )
     optional = parser.add_argument_group("Optional arguments")
     optional.add_argument(
@@ -102,9 +109,8 @@ def _parse_args(argv: list[str]) -> Namespace:
     optional.add_argument(
         "-s",
         "--show",
-        action=ShowConfig,
-        help="Show a pro-forma config and exit",
-        nargs=0,
+        action="store_true",
+        help="Show the realized config and exit",
     )
     optional.add_argument(
         "-v",
@@ -119,11 +125,11 @@ def _parse_args(argv: list[str]) -> Namespace:
 def _process_args(args: Namespace) -> None:
     if args.list:
         _show_tasks()
-        if not args.check:
+        if not args.check and not args.show:
             sys.exit(0)
     if not args.config:
         fail("No configuration file specified")
-    if args.check:
+    if args.check or args.show:
         return
     if args.task not in tasknames(workflow):
         logging.error("No such task: %s", args.task)
@@ -141,12 +147,3 @@ def _show_tasks() -> None:
 def _version() -> str:
     info = json.loads(resource("info.json"))
     return "version %s build %s" % (info["version"], info["buildnum"])
-
-
-class ShowConfig(Action):
-    def __init__(self, option_strings, dest, **kwargs):
-        super().__init__(option_strings, dest, **kwargs)
-
-    def __call__(self, parser, namespace, values, option_string=None):  # noqa: ARG002
-        print(resource("config-grid.yaml").strip())
-        sys.exit(0)
