@@ -395,7 +395,7 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
     prepbufr = _req_prepbufr(url, path.parent)
     yield {"cfgfile": cfgfile, "prepbufr": prepbufr}
     runscript = cfgfile.ref.with_suffix(".sh")
-    content = f"pb2nc -v 4 {prepbufr.ref} {path} {cfgfile.ref} >{path.stem}.log 2>&1"
+    content = f"time pb2nc -v 4 {prepbufr.ref} {path} {cfgfile.ref} >{path.stem}.log 2>&1"
     _write_runscript(runscript, content)
     path.parent.mkdir(parents=True, exist_ok=True)
     mpexec(str(runscript), rundir, taskname)
@@ -478,7 +478,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     runscript = path.with_suffix(".sh")
     content = f"""
     export OMP_NUM_THREADS=1
-    grid_stat -v 4 {forecast_grid.ref} {baseline_grid.ref} {config.ref} >{path.stem}.log 2>&1
+    time grid_stat -v 4 {forecast_grid.ref} {baseline_grid.ref} {config.ref} >{path.stem}.log 2>&1
     """
     _write_runscript(runscript, content)
     mpexec(str(runscript), rundir, taskname)
@@ -507,7 +507,7 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
         reqs.append(config)
     yield reqs
     runscript = path.with_suffix(".sh")
-    content = "point_stat -v 4 {forecast} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
+    content = "time point_stat -v 4 {forecast} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
         forecast=forecast_grid.ref,
         obs=obs.ref,
         config=config.ref,
