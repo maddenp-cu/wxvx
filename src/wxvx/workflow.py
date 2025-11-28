@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 import re
-import threading
 from datetime import datetime
 from functools import cache
 from itertools import chain, pairwise, product
 from pathlib import Path
 from stat import S_IEXEC
 from textwrap import dedent
+from threading import Lock
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from warnings import catch_warnings, simplefilter
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
     from wxvx.types import Config, VarMeta
 
-plotlock = threading.Lock()
+_PLOT_LOCK = Lock()
 
 # Public tasks
 
@@ -395,7 +395,12 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
     prepbufr = _req_prepbufr(url, path.parent)
     yield {"cfgfile": cfgfile, "prepbufr": prepbufr}
     runscript = cfgfile.ref.with_suffix(".sh")
-    content = f"time pb2nc -v 4 {prepbufr.ref} {path} {cfgfile.ref} >{path.stem}.log 2>&1"
+    content = "exec time pb2nc -v 4 {prepbufr} {netcdf} {config} >{log} 2>&1".format(
+        prepbufr=prepbufr.ref,
+        netcdf=path,
+        config=cfgfile.ref,
+        log=f"{path.stem}.log",
+    )
     _write_runscript(runscript, content)
     path.parent.mkdir(parents=True, exist_ok=True)
     mpexec(str(runscript), rundir, taskname)
@@ -420,7 +425,7 @@ def _plot(
     plot_data = _prepare_plot_data(reqs, stat, width)
     hue = "LABEL" if "LABEL" in plot_data.columns else "MODEL"
     w = f"(width={width}) " if width else ""
-    with plotlock:
+    with _PLOT_LOCK:
         sns.set(style="darkgrid")
         plt.figure(figsize=(10, 6), constrained_layout=True)
         sns.lineplot(data=plot_data, x="FCST_LEAD", y=stat, hue=hue, marker="o", linewidth=2)
@@ -476,10 +481,15 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
         reqs.append(config)
     yield reqs
     runscript = path.with_suffix(".sh")
-    content = f"""
+    content = """
     export OMP_NUM_THREADS=1
-    time grid_stat -v 4 {forecast_grid.ref} {baseline_grid.ref} {config.ref} >{path.stem}.log 2>&1
-    """
+    exec time grid_stat -v 4 {fcst} {obs} {config} >{log} 2>&1
+    """.format(
+        fcst=forecast_grid.ref,
+        obs=baseline_grid.ref,
+        config=config.ref,
+        log=f"{path.stem}.log",
+    )
     _write_runscript(runscript, content)
     mpexec(str(runscript), rundir, taskname)
 
@@ -507,8 +517,8 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
         reqs.append(config)
     yield reqs
     runscript = path.with_suffix(".sh")
-    content = "time point_stat -v 4 {forecast} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
-        forecast=forecast_grid.ref,
+    content = "exec time point_stat -v 4 {fcst} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
+        fcst=forecast_grid.ref,
         obs=obs.ref,
         config=config.ref,
         rundir=rundir,
