@@ -6,9 +6,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import numpy as np
 import xarray as xr
+from iotaa import Node
 from pytest import fixture
 
 from wxvx import times
@@ -204,6 +206,11 @@ def logged(caplog):
         return found
 
     return logged
+
+
+@fixture
+def node():
+    return Mock(ready=True, spec=Node)
 
 
 @fixture
