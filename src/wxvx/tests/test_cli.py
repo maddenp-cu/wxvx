@@ -66,10 +66,11 @@ def test_cli_main__check_config(fs, switch, truthtype):
         patch.object(cli.sys, "argv", argv),
         patch.object(cli, "tasknames", return_value=["grids"]),
         patch.object(cli.workflow, "grids") as grids,
-        raises(SystemExit),
+        raises(SystemExit) as e,
     ):
         cli.main()
     grids.assert_not_called()
+    assert e.value.code == 0
 
 
 def test_cli_main__exception(logged):
@@ -95,8 +96,8 @@ def test_cli_main__task_list(caplog, switch, tidy):
         expected = """
         Available tasks:
           grids
-          grids_baseline
           grids_forecast
+          grids_truth
           ncobs
           obs
           plots
