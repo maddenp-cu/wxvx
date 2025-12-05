@@ -7,18 +7,28 @@ from datetime import datetime, timedelta
 from enum import Enum, auto
 from functools import cached_property
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from uwtools.api.config import YAMLConfig, validate
 
 from wxvx.util import LINETYPE, WXVXError, expand, resource_path, to_datetime, to_timedelta
 
+_TRUTH_NAMES_GRID = ("GFS", "HRRR")
+_TRUTH_NAMES_POINT = ("PREPBUFR",)
+_TRUTH_NAMES = tuple(sorted([*_TRUTH_NAMES_GRID, *_TRUTH_NAMES_POINT]))
+
 _DatetimeT = str | datetime
 _TimedeltaT = str | int
+
+
+class Named(Protocol):
+    name: str
+
 
 Source = Enum(
     "Source",
     [
+        ("BASELINE", auto()),
         ("FORECAST", auto()),
         ("TRUTH", auto()),
     ],
@@ -32,8 +42,8 @@ ToGridVal = Enum(
     ],
 )
 
-VxType = Enum(
-    "VxType",
+TruthType = Enum(
+    "TruthType",
     [
         ("GRID", auto()),
         ("POINT", auto()),
@@ -52,14 +62,35 @@ def validated_config(yc: YAMLConfig) -> Config:
 # schema check. If an assertion is triggered, it's a wxvx bug, not a user issue.
 
 
+@dataclass(frozen=True)
+class Baseline:
+    name: str | None
+    url: str | None = None
+
+    def __post_init__(self):
+        # Handle 'name':
+        names = [*_TRUTH_NAMES_GRID, "truth", None]
+        if self.name not in names:
+            strnames = [str(name) for name in names]
+            raise WXVXError("Set baseline.name to one of: %s" % ", ".join(strnames))
+        # Handle combination of 'name' and 'url':
+        if self.name == "truth":
+            assert self.url is None
+        elif self.name is not None:
+            assert self.url is not None
+
+
 class Config:
     def __init__(self, raw: dict):
+        baseline = raw.get("baseline", {"name": None})
         paths = raw["paths"]
         grids = paths["grids"]
+        self.baseline = Baseline(**baseline)
         self.cycles = Cycles(raw["cycles"])
         self.forecast = Forecast(**raw["forecast"])
         self.leadtimes = Leadtimes(raw["leadtimes"])
         self.paths = Paths(
+            grids.get("baseline"),
             grids.get("forecast"),
             grids.get("truth"),
             paths.get("obs"),
@@ -71,7 +102,7 @@ class Config:
         self.variables = raw["variables"]
         self._validate()
 
-    KEYS = ("cycles", "forecast", "leadtimes", "paths", "truth", "variables")
+    KEYS = ("baseline", "cycles", "forecast", "leadtimes", "paths", "truth", "variables")
 
     def __eq__(self, other):
         return all(getattr(self, k) == getattr(other, k) for k in self.KEYS)
@@ -87,17 +118,31 @@ class Config:
         # Validation tests that span disparate config subtrees are awkward to express in
         # JSON Schema (or yield poor user-facing feedback) and are instead enforced here
         # with explicit checks.
-        if self.forecast.name == self.truth.name:
-            msg = "forecast.name and truth.name must differ"
+
+        names = (self.baseline.name, self.forecast.name, self.truth.name)
+        if len(set(names)) != len(names):
+            msg = "Distinct baseline.name (if set), forecast.name, and truth.name required"
             raise WXVXError(msg)
-        if self.truth.type == VxType.GRID and not self.paths.grids_truth:
-            msg = "Specify path.grids.truth when truth.type is 'grid'"
-            raise WXVXError(msg)
-        if self.truth.type == VxType.POINT and not self.paths.obs:
-            msg = "Specify path.obs when truth.type is 'point'"
+        if self.baseline.name == "truth":
+            if self.truth.type is TruthType.POINT:
+                msg = "Settings baseline.name '%s' and truth.type '%s' are incompatible" % (
+                    self.baseline.name,
+                    self.truth.type.name.lower(),
+                )
+                raise WXVXError(msg)
+            if self.paths.grids_baseline is not None:
+                logging.warning("Ignoring paths.grids.baseline when baseline.name is 'truth'")
+        elif self.baseline.name is not None and not self.paths.grids_baseline:
+            msg = "Specify paths.grids.baseline when baseline.name is not 'truth'"
             raise WXVXError(msg)
         if self.regrid.to == "OBS":
             msg = "Cannot regrid to observations per regrid.to config value"
+            raise WXVXError(msg)
+        if self.truth.type == TruthType.GRID and not self.paths.grids_truth:
+            msg = "Specify paths.grids.truth when truth.type is '%s'" % TruthType.GRID.name.lower()
+            raise WXVXError(msg)
+        if self.truth.type == TruthType.POINT and not self.paths.obs:
+            msg = "Specify paths.obs when truth.type is '%s'" % TruthType.POINT.name.lower()
             raise WXVXError(msg)
 
 
@@ -226,13 +271,14 @@ class Leadtimes:
 
 @dataclass(frozen=True)
 class Paths:
+    grids_baseline: Path
     grids_forecast: Path
     grids_truth: Path
     obs: Path
     run: Path
 
     def __post_init__(self):
-        for key in ["grids_forecast", "grids_truth", "obs", "run"]:
+        for key in ["grids_baseline", "grids_forecast", "grids_truth", "obs", "run"]:
             if val := getattr(self, key):
                 _force(self, key, Path(val))
 
@@ -280,17 +326,35 @@ class ToGrid:
 
 @dataclass(frozen=True)
 class Truth:
-    compare: bool
     name: str
+    type: TruthType
     url: str
-    type: VxType
 
     def __post_init__(self):
-        keys = ["grid", "point"]
+        # Handle 'type': Check validity and normalize values:
+        types = dict(
+            zip(
+                [TruthType.GRID.name.lower(), TruthType.POINT.name.lower()],
+                [TruthType.GRID, TruthType.POINT],
+                strict=True,
+            )
+        )
         if isinstance(self.type, str):
-            assert self.type in keys
-        newval = dict(zip(keys, [VxType.GRID, VxType.POINT], strict=True))
-        _force(self, "type", newval.get(str(self.type), self.type))
+            assert self.type in types
+        _force(self, "type", types.get(str(self.type), self.type))
+        # Handle 'name':
+        if self.name not in _TRUTH_NAMES:
+            raise WXVXError("Set truth.name to one of: %s" % ", ".join(_TRUTH_NAMES))
+        if self.type is TruthType.GRID and self.name not in _TRUTH_NAMES_GRID:
+            raise WXVXError(
+                "When truth.type is '%s' set truth.name to: %s"
+                % (self.type.name.lower(), ", ".join(_TRUTH_NAMES_GRID))
+            )
+        if self.type is TruthType.POINT and self.name not in _TRUTH_NAMES_POINT:
+            raise WXVXError(
+                "When truth.type is '%s' set truth.name to: %s"
+                % (self.type.name.lower(), ", ".join(_TRUTH_NAMES_POINT))
+            )
 
 
 @dataclass(frozen=True)

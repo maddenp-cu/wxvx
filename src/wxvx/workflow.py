@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
 from functools import cache
 from itertools import chain, pairwise, product
 from pathlib import Path
 from stat import S_IEXEC
 from textwrap import dedent
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 from warnings import catch_warnings, simplefilter
 
@@ -27,7 +26,7 @@ from wxvx import variables
 from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
 from wxvx.times import TimeCoords, gen_validtimes, hh, tcinfo, yyyymmdd
-from wxvx.types import Cycles, Source, VxType
+from wxvx.types import Cycles, Named, Source, TruthType
 from wxvx.util import (
     LINETYPE,
     DataFormat,
@@ -38,11 +37,13 @@ from wxvx.util import (
     classify_url,
     mpexec,
     render,
+    version,
 )
 from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, metlevel
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from datetime import datetime
 
     from wxvx.types import Config, VarMeta
 
@@ -52,44 +53,56 @@ _PLOT_LOCK = Lock()
 
 
 @collection
-def grids(c: Config, forecast: bool = True, truth: bool = True):
-    truth = truth and c.truth.type == VxType.GRID
-    if forecast and not truth:
-        suffix = "{f}"
-    elif truth and not forecast:
-        suffix = "{t}"
-    else:
-        suffix = "{f} vs {t}"
-    taskname = "Grids for %s" % suffix.format(f=c.forecast.name, t=c.truth.name)
-    yield taskname
-    reqs: list[Node] = []
-    for var, varname in _vxvars(c).items():
-        for tc in gen_validtimes(c.cycles, c.leadtimes):
-            if forecast:
-                forecast_path = Path(render(c.forecast.path, tc, context=c.raw))
-                forecast_grid, _ = _req_grid(forecast_path, c, varname, tc, var)
-                reqs.append(forecast_grid)
-            if truth:
-                truth_grid = _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var)
-                reqs.append(truth_grid)
-                if c.truth.compare:
-                    comp_grid = _grid_grib(c, tc, var)
-                    reqs.append(comp_grid)
+def grids(c: Config):
+    yield "Grids"
+    reqs = [grids_forecast(c)]
+    if c.baseline.name:
+        reqs.append(grids_baseline(c))
+    if c.truth.type == TruthType.GRID:
+        reqs.append(grids_truth(c))
     yield reqs
 
 
 @collection
+def grids_baseline(c: Config):
+    if c.baseline.name is None:
+        yield "No baseline defined"
+        yield None
+    else:
+        name, source = (
+            (c.truth.name, Source.TRUTH)
+            if c.baseline.name == "truth"
+            else (c.baseline.name, Source.BASELINE)
+        )
+        yield "Baseline grids for %s" % name
+        reqs = []
+        for var, _, tc in _vars_varnames_times(c):
+            reqs.append(_grid_grib(c, tc, var, source))
+        yield reqs
+
+
+@collection
 def grids_forecast(c: Config):
-    taskname = "Forecast grids for %s" % c.forecast.name
-    yield taskname
-    yield grids(c, forecast=True, truth=False)
+    yield "Forecast grids for %s" % c.forecast.name
+    reqs = []
+    for var, varname, tc in _vars_varnames_times(c):
+        path = Path(render(c.forecast.path, tc, context=c.raw))
+        node, _ = _forecast_grid(path, c, varname, tc, var)
+        reqs.append(node)
+    yield reqs
 
 
 @collection
 def grids_truth(c: Config):
-    taskname = "Truth grids for %s" % c.truth.name
-    yield taskname
-    yield grids(c, forecast=False, truth=True)
+    yield "Truth grids for %s" % c.truth.name
+    if c.truth.type is TruthType.GRID:
+        reqs = [
+            _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var, Source.TRUTH)
+            for var, _, tc in _vars_varnames_times(c)
+        ]
+    else:
+        reqs = None
+    yield reqs
 
 
 @collection
@@ -113,7 +126,7 @@ def obs(c: Config):
         tc_valid = TimeCoords(tc.validtime)
         url = render(c.truth.url, tc_valid, context=c.raw)
         yyyymmdd, hh, _ = tcinfo(tc_valid)
-        reqs.append(_req_prepbufr(url, c.paths.obs / yyyymmdd / hh))
+        reqs.append(_prepbufr(url, c.paths.obs / yyyymmdd / hh))
     yield reqs
 
 
@@ -124,8 +137,8 @@ def plots(c: Config):
     yield [
         _plot(c, cycle, varname, level, stat, width)
         for cycle in c.cycles.values  # noqa: PD011
-        for varname, level in _varnames_and_levels(c)
-        for stat, width in _stats_and_widths(c, varname)
+        for varname, level in _varnames_levels(c)
+        for stat, width in _stats_widths(c, varname)
     ]
 
 
@@ -134,8 +147,8 @@ def stats(c: Config):
     taskname = "Stats for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
     reqs: list[Node] = []
-    for varname, level in _varnames_and_levels(c):
-        reqs.extend(_statreqs(c, varname, level))
+    for varname, level in _varnames_levels(c):
+        reqs.extend(_stat_reqs(c, varname, level))
     yield reqs
 
 
@@ -209,12 +222,13 @@ def _config_point_stat(
     yield None
     field_fcst, field_obs = _config_fields(c, varname, var, datafmt)
     surface = var.level_type in ("heightAboveGround", "surface")
+    sections = {Source.BASELINE: c.baseline, Source.FORECAST: c.forecast, Source.TRUTH: c.truth}
     config = {
         "fcst": {"field": [field_fcst]},
         "interp": {"shape": "SQUARE", "type": {"method": "BILIN", "width": 2}, "vld_thresh": 1.0},
         "message_type": ["SFC" if surface else "ATM"],
         "message_type_group_map": {"ATM": "ADPUPA,AIRCAR,AIRCFT", "SFC": "ADPSFC"},
-        "model": c.truth.name if source == Source.TRUTH else c.forecast.name,
+        "model": cast(Named, sections[source]).name,
         "obs": {"field": [field_obs]},
         "obs_window": {"beg": -900 if surface else -1800, "end": 900 if surface else 1800},
         "output_flag": {"cnt": "BOTH"},
@@ -242,7 +256,7 @@ def _forecast_dataset(path: Path):
     taskname = "Forecast dataset %s" % path
     yield taskname
     ds = xr.Dataset()
-    yield Asset(ds, lambda: bool(ds))  # type: ignore[misc]
+    yield Asset(ds, lambda: bool(ds))
     yield _existing(path)
     logging.info("%s: Opening forecast %s", taskname, path)
     with catch_warnings():
@@ -276,9 +290,10 @@ def _grib_index_data_wgrib2(c: Config, outdir: Path, tc: TimeCoords, url: str):
 
 
 @task
-def _grib_index_file_eccodes(c: Config, grib_path: Path, tc: TimeCoords):
+def _grib_index_file_eccodes(c: Config, grib_path: Path, tc: TimeCoords, source: Source):
     yyyymmdd, hh, leadtime = tcinfo(tc)
-    outdir = c.paths.grids_truth / yyyymmdd / hh / leadtime
+    gridsdir = c.paths.grids_truth if source is Source.TRUTH else c.paths.grids_baseline
+    outdir = gridsdir / yyyymmdd / hh / leadtime
     outdir.mkdir(parents=True, exist_ok=True)
     path = outdir / f"{grib_path.name}.ecidx"
     taskname = "GRIB index file %s %s" % (path, _at_validtime(tc))
@@ -293,12 +308,12 @@ def _grib_index_file_eccodes(c: Config, grib_path: Path, tc: TimeCoords):
 
 
 @task
-def _grib_message_in_file(c: Config, path: Path, tc: TimeCoords, var: Var):
+def _grib_message_in_file(c: Config, path: Path, tc: TimeCoords, var: Var, source: Source):
     taskname = "GRIB message for %s in %s %s" % (var, path, _at_validtime(tc))
     yield taskname
     exists = [False]
     yield Asset(exists, lambda: exists[0])
-    idx = _grib_index_file_eccodes(c, path, tc)
+    idx = _grib_index_file_eccodes(c, path, tc, source)
     yield idx
     idx = ec.codes_index_read(str(idx.ref))
     for k, v in [
@@ -317,21 +332,26 @@ def _grib_message_in_file(c: Config, path: Path, tc: TimeCoords, var: Var):
 
 
 @task
-def _grid_grib(c: Config, tc: TimeCoords, var: Var):
-    url = render(c.truth.url, tc, context=c.raw)
+def _grid_grib(c: Config, tc: TimeCoords, var: Var, source: Source):
+    assert source in (Source.BASELINE, Source.TRUTH)
+    template = c.truth.url
+    if source is Source.BASELINE and c.baseline.name != "truth":
+        template = cast(str, c.baseline.url)
+    url = render(template, tc, context=c.raw)
     proximity, src = classify_url(url)
     if proximity == Proximity.LOCAL:
         yield "GRIB file %s providing %s grid %s" % (src, var, _at_validtime(tc))
         exists = [False]
         yield Asset(src, lambda: exists[0])
-        msg = _grib_message_in_file(c, src, tc, var)
+        msg = _grib_message_in_file(c, src, tc, var, source)
         yield msg
         exists[0] = msg.ready
     else:
         yyyymmdd, hh, leadtime = tcinfo(tc)
-        outdir = c.paths.grids_truth / yyyymmdd / hh / leadtime
+        gridsdir = c.paths.grids_truth if source is Source.TRUTH else c.paths.grids_baseline
+        outdir = gridsdir / yyyymmdd / hh / leadtime
         path = outdir / f"{var}.grib2"
-        taskname = "Truth grid %s" % path
+        taskname = "%s grid %s" % (source.name.lower().capitalize(), path)
         yield taskname
         yield Asset(path, path.is_file)
         idxdata = _grib_index_data_wgrib2(c, outdir, tc, url=f"{url}.idx")
@@ -392,7 +412,7 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
     yield Asset(path, path.is_file)
     rundir = c.paths.run / "pb2nc" / yyyymmdd / hh
     cfgfile = _config_pb2nc(c, rundir / path.with_suffix(".config").name)
-    prepbufr = _req_prepbufr(url, path.parent)
+    prepbufr = _prepbufr(url, path.parent)
     yield {"cfgfile": cfgfile, "prepbufr": prepbufr}
     runscript = cfgfile.ref.with_suffix(".sh")
     content = "exec time pb2nc -v 4 {prepbufr} {netcdf} {config} >{log} 2>&1".format(
@@ -419,13 +439,14 @@ def _plot(
     rundir = c.paths.run / "plots" / yyyymmdd(cycle) / hh(cycle)
     path = rundir / f"{var}-{stat}{'-width-' + str(width) if width else ''}-plot.png"
     yield Asset(path, path.is_file)
-    reqs = _statreqs(c, varname, level, cycle)
+    reqs = _stat_reqs(c, varname, level, cycle)
     yield reqs
     leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]  # noqa: PD011
     plot_data = _prepare_plot_data(reqs, stat, width)
     hue = "LABEL" if "LABEL" in plot_data.columns else "MODEL"
     w = f"(width={width}) " if width else ""
-    with _PLOT_LOCK:
+    with _PLOT_LOCK, catch_warnings():
+        simplefilter("ignore")
         sns.set(style="darkgrid")
         plt.figure(figsize=(10, 6), constrained_layout=True)
         sns.lineplot(data=plot_data, x="FCST_LEAD", y=stat, hue=hue, marker="o", linewidth=2)
@@ -436,6 +457,8 @@ def _plot(
         plt.ylabel(f"{stat} ({meta.units})")
         plt.xticks(ticks=[int(lt) for lt in leadtimes], labels=leadtimes, rotation=90)
         plt.legend(title="Model", bbox_to_anchor=(1.02, 1), loc="upper left")
+        plt.figtext(0.403, 0.0, f"wxvx {version()}", fontsize=6)
+        plt.tight_layout(rect=(0, 0.005, 1, 1))
         path.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(path, bbox_inches="tight")
         plt.close()
@@ -454,8 +477,7 @@ def _polyfile(path: Path, mask: tuple[tuple[float, float]]):
 
 @task
 def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source: Source):
-    source_name = {Source.FORECAST: "forecast", Source.TRUTH: "truth"}[source]
-    taskname = "Stats vs grid for %s %s %s" % (source_name, var, _at_validtime(tc))
+    taskname = "Stats vs grid for %s %s %s" % (source.name.lower(), var, _at_validtime(tc))
     yield taskname
     yyyymmdd, hh, leadtime = tcinfo(tc)
     rundir = c.paths.run / "stats" / yyyymmdd / hh / leadtime
@@ -463,14 +485,14 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     template = "grid_stat_%s_%02d0000L_%s_%s0000V.stat"
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
     yield Asset(path, path.is_file)
-    truth_grid = _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var)
-    forecast_grid: Node
-    if source == Source.TRUTH:
-        forecast_grid, datafmt = _grid_grib(c, tc, var), DataFormat.GRIB
+    if source == Source.FORECAST:
+        location = Path(render(c.forecast.path, tc, context=c.raw))
+        fcst, datafmt = _forecast_grid(location, c, varname, tc, var)
     else:
-        forecast_path = Path(render(c.forecast.path, tc, context=c.raw))
-        forecast_grid, datafmt = _req_grid(forecast_path, c, varname, tc, var)
-    reqs = [forecast_grid, truth_grid]
+        fcst = _grid_grib(c, tc, var, source)
+        datafmt = DataFormat.GRIB
+    obs = _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var, Source.TRUTH)
+    reqs = [fcst, obs]
     polyfile = None
     if mask := c.forecast.mask:
         polyfile = _polyfile(c.paths.run / "stats" / "mask.poly", mask)
@@ -485,8 +507,8 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     export OMP_NUM_THREADS=1
     exec time grid_stat -v 4 {fcst} {obs} {config} >{log} 2>&1
     """.format(
-        fcst=forecast_grid.ref,
-        obs=truth_grid.ref,
+        fcst=fcst.ref,
+        obs=obs.ref,
         config=config.ref,
         log=f"{path.stem}.log",
     )
@@ -496,8 +518,8 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
 
 @task
 def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str, source: Source):
-    source_name = {Source.FORECAST: "forecast", Source.TRUTH: "truth"}[source]
-    taskname = "Stats vs obs for %s %s %s" % (source_name, var, _at_validtime(tc))
+    assert source in (Source.BASELINE, Source.FORECAST)
+    taskname = "Stats vs obs for %s %s %s" % (source.name.lower(), var, _at_validtime(tc))
     yield taskname
     yyyymmdd, hh, leadtime = tcinfo(tc)
     rundir = c.paths.run / "stats" / yyyymmdd / hh / leadtime
@@ -507,9 +529,13 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
     yield Asset(path, path.is_file)
     obs = _netcdf_from_obs(c, TimeCoords(tc.validtime))
     reqs: list[Node] = [obs]
-    forecast_path = Path(render(c.forecast.path, tc, context=c.raw))
-    forecast_grid, datafmt = _req_grid(forecast_path, c, varname, tc, var)
-    reqs.append(forecast_grid)
+    if source is Source.FORECAST:
+        location = Path(render(c.forecast.path, tc, context=c.raw))
+        fcst, datafmt = _forecast_grid(location, c, varname, tc, var)
+    else:
+        fcst = _grid_grib(c, tc, var, Source.BASELINE)
+        datafmt = DataFormat.GRIB
+    reqs.append(fcst)
     config = _config_point_stat(
         c, path.with_suffix(".config"), source, varname, var, prefix, datafmt
     )
@@ -518,7 +544,7 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
     yield reqs
     runscript = path.with_suffix(".sh")
     content = "exec time point_stat -v 4 {fcst} {obs} {config} -outdir {rundir} >{log} 2>&1".format(
-        fcst=forecast_grid.ref,
+        fcst=fcst.ref,
         obs=obs.ref,
         config=config.ref,
         rundir=rundir,
@@ -558,9 +584,20 @@ def _config_fields(c: Config, varname: str, var: Var, datafmt: DataFormat):
 
 
 def _enforce_point_truth_type(c: Config, taskname: str):
-    if c.truth.type != VxType.POINT:
+    if c.truth.type != TruthType.POINT:
         msg = "%s: This task requires that config value truth.type be set to 'point'"
         raise WXVXError(msg % taskname)
+
+
+def _forecast_grid(
+    path: Path, c: Config, varname: str, tc: TimeCoords, var: Var
+) -> tuple[Node, DataFormat]:
+    data_format = classify_data_format(path)
+    if data_format is DataFormat.UNKNOWN:
+        return _missing(path), data_format
+    if data_format == DataFormat.GRIB:
+        return _existing(path), data_format
+    return _grid_nc(c, varname, tc, var), data_format
 
 
 def _meta(c: Config, varname: str) -> VarMeta:
@@ -587,6 +624,13 @@ def _prepare_plot_data(reqs: Sequence[Node], stat: str, width: int | None) -> pd
     return plot_data
 
 
+def _prepbufr(url: str, outdir: Path) -> Node:
+    proximity, src = classify_url(url)
+    if proximity == Proximity.LOCAL:
+        return _existing(src)
+    return _local_file_from_http(outdir, url, "prepbufr file")
+
+
 def _regrid_width(c: Config) -> int:
     try:
         return {"BILIN": 2, "NEAREST": 1}[c.regrid.method]
@@ -595,35 +639,18 @@ def _regrid_width(c: Config) -> int:
         raise WXVXError(msg) from e
 
 
-def _req_grid(
-    path: Path, c: Config, varname: str, tc: TimeCoords, var: Var
-) -> tuple[Node, DataFormat]:
-    data_format = classify_data_format(path)
-    if data_format is DataFormat.UNKNOWN:
-        return _missing(path), data_format
-    if data_format == DataFormat.GRIB:
-        return _existing(path), data_format
-    return _grid_nc(c, varname, tc, var), data_format
-
-
-def _req_prepbufr(url: str, outdir: Path) -> Node:
-    proximity, src = classify_url(url)
-    if proximity == Proximity.LOCAL:
-        return _existing(src)
-    return _local_file_from_http(outdir, url, "prepbufr file")
-
-
-def _statargs(
-    c: Config, varname: str, level: float | None, source: Source, cycle: datetime | None = None
+def _stat_args(
+    c: Config, varname: str, level: float | None, source: Source, cycle: datetime | None
 ) -> Iterator:
-    if isinstance(cycle, datetime):
+    if cycle:
         start = cycle.strftime("%Y-%m-%dT%H:%M:%S")
         step = "00:00:00"
         stop = start
         cycles = Cycles(dict(start=start, step=step, stop=stop))
     else:
         cycles = c.cycles
-    name = (c.truth if source == Source.TRUTH else c.forecast).name.lower()
+    sections = {Source.BASELINE: c.baseline, Source.FORECAST: c.forecast, Source.TRUTH: c.truth}
+    name = cast(Named, sections[source]).name.lower()
     prefix = lambda var: "%s_%s" % (name, str(var).replace("-", "_"))
     args = [
         (c, vn, tc, var, prefix(var), source)
@@ -633,18 +660,19 @@ def _statargs(
     return iter(sorted(args))
 
 
-def _statreqs(
+def _stat_reqs(
     c: Config, varname: str, level: float | None, cycle: datetime | None = None
 ) -> Sequence[Node]:
-    f = _stats_vs_obs if c.truth.type == VxType.POINT else _stats_vs_grid
-    genreqs = lambda source: [f(*args) for args in _statargs(c, varname, level, source, cycle)]
-    reqs: Sequence[Node] = genreqs(Source.FORECAST)
-    if c.truth.compare:
-        reqs = [*reqs, *genreqs(Source.TRUTH)]
+    f = _stats_vs_obs if c.truth.type == TruthType.POINT else _stats_vs_grid
+    reqs_for = lambda source: [f(*args) for args in _stat_args(c, varname, level, source, cycle)]
+    reqs: Sequence[Node] = reqs_for(Source.FORECAST)
+    if c.baseline.name is not None:
+        source = Source.TRUTH if c.baseline.name == "truth" else Source.BASELINE
+        reqs = [*reqs, *reqs_for(source)]
     return reqs
 
 
-def _stats_and_widths(c: Config, varname) -> Iterator[tuple[str, int | None]]:
+def _stats_widths(c: Config, varname) -> Iterator[tuple[str, int | None]]:
     meta = _meta(c, varname)
     return chain.from_iterable(
         ((stat, width) for width in (meta.nbrhd_width or []))
@@ -659,11 +687,19 @@ def _var(c: Config, varname: str, level: float | None) -> Var:
     return Var(m.name, m.level_type, level)
 
 
-def _varnames_and_levels(c: Config) -> Iterator[tuple[str, float | None]]:
+def _varnames_levels(c: Config) -> Iterator[tuple[str, float | None]]:
     return iter(
         (varname, level)
         for varname, attrs in c.variables.items()
         for level in attrs.get("levels", [None])
+    )
+
+
+def _vars_varnames_times(c: Config) -> Iterator[tuple[Var, str, TimeCoords]]:
+    return iter(
+        (var, varname, tc)
+        for var, varname in _vxvars(c).items()
+        for tc in gen_validtimes(c.cycles, c.leadtimes)
     )
 
 

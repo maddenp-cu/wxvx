@@ -4,6 +4,7 @@ Tests for wxvx.util.
 
 import logging
 import os
+import re
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -153,7 +154,14 @@ def test_util_fail(caplog):
 
 
 @mark.parametrize("env", [{"PI": "3.14"}, None])
-def test_util_mpexec(env, tmp_path):
+@mark.parametrize("delpool", [True, False])
+def test_util_mpexec(delpool, env, tmp_path):
+    # This is safe because pytest-xdist parallelizes across *processes*, and each process has its
+    # own memory space, and tests run serially within each process, so if this test is running then
+    # no other test is modifying the state / pool.
+    util._initpool()
+    if delpool:
+        del util._STATE["pool"]
     path = tmp_path / "out"
     cmd = 'echo "$PI" >%s' % path
     util.mpexec(cmd=cmd, rundir=tmp_path, taskname="foo", env=env)
@@ -206,3 +214,7 @@ def test_util_to_datetime(utc):
 def test_util_to_timedelta():
     assert util.to_timedelta(value="01:02:03") == timedelta(hours=1, minutes=2, seconds=3)
     assert util.to_timedelta(value="168:00:00") == timedelta(days=7)
+
+
+def test_util_version():
+    assert re.match(r"^version \d+\.\d+\.\d+ build \d+$", util.version())

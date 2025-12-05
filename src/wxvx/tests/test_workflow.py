@@ -20,9 +20,9 @@ from pytest import fixture, mark, raises
 
 from wxvx import variables, workflow
 from wxvx.tests.support import with_del
-from wxvx.times import gen_validtimes, tcinfo
-from wxvx.types import Config, Source
-from wxvx.util import DataFormat, WXVXError
+from wxvx.times import TimeCoords, gen_validtimes, tcinfo
+from wxvx.types import Config, Source, TruthType
+from wxvx.util import DataFormat, WXVXError, resource_path
 from wxvx.variables import Var
 
 TESTDATA = {
@@ -81,35 +81,54 @@ TESTDATA = {
 # Task Tests
 
 
-@mark.parametrize("compare", [True, False])
-@mark.parametrize("fmt", [DataFormat.NETCDF, DataFormat.ZARR])
-def test_workflow_grids(c, compare, fmt, ngrids, noop):
-    c.truth = replace(c.truth, compare=compare)
+@mark.parametrize("baseline_name", ["HRRR", "truth", None])
+@mark.parametrize("truth_type", [TruthType.GRID, TruthType.POINT])
+def test_workflow_grids(baseline_name, c, noop, truth_type):
+    url = None if baseline_name == "truth" else c.baseline.url
+    c.baseline = replace(c.baseline, name=baseline_name, url=url)
+    truth_name = "GFS" if truth_type is TruthType.GRID else "PREPBUFR"
+    c.truth = replace(c.truth, name=truth_name, type=truth_type)
+    expected = 1
+    if baseline_name is not None:
+        expected += 1
+    if truth_type is TruthType.GRID:
+        expected += 1
     with (
-        patch.object(workflow, "_grid_grib", noop),
-        patch.object(workflow, "_grid_nc", noop),
-        patch.object(workflow, "classify_data_format", return_value=fmt),
+        patch.object(workflow, "grids_baseline", noop),
+        patch.object(workflow, "grids_forecast", noop),
+        patch.object(workflow, "grids_truth", noop),
     ):
-        ntypes = 3 if compare else 2  # forecast, truth, and optionally comp grids
-        assert len(workflow.grids(c=c).ref) == ngrids * ntypes  # type: ignore[operator]
-        assert len(workflow.grids(c=c, forecast=True, truth=True).ref) == ngrids * ntypes
-        assert len(workflow.grids(c=c, forecast=False, truth=True).ref) == ngrids * (ntypes - 1)
-        assert len(workflow.grids(c=c, forecast=True, truth=False).ref) == ngrids
-        assert len(workflow.grids(c=c, forecast=False, truth=False).ref) == 0
+        assert len(workflow.grids(c=c).ref) == expected
 
 
-@mark.parametrize("fmt", [DataFormat.NETCDF, DataFormat.ZARR])
-def test_workflow_grids_forecast(c, fmt, ngrids, noop):
-    with (
-        patch.object(workflow, "_grid_nc", noop),
-        patch.object(workflow, "classify_data_format", return_value=fmt),
-    ):
+@mark.parametrize("baseline_name", ["HRRR", "truth", None])
+def test_workflow_grids_baseline(baseline_name, c, ngrids, noop):
+    url = None if baseline_name == "truth" else c.baseline.url
+    c.baseline = replace(c.baseline, name=baseline_name, url=url)
+    with patch.object(workflow, "_grid_grib", noop):
+        node = workflow.grids_baseline(c=c)
+    if baseline_name is None:
+        assert node.req is None
+        assert node.taskname == "No baseline defined"
+    else:
+        assert len(cast(list[Node], node.req)) == ngrids
+        assert node.taskname == "Baseline grids for %s" % (
+            c.truth.name if baseline_name == "truth" else baseline_name
+        )
+
+
+def test_workflow_grids_forecast(c, ngrids, noop):
+    with patch.object(workflow, "_forecast_grid", return_value=(noop(), None)):
         assert len(workflow.grids_forecast(c=c).ref) == ngrids
 
 
-def test_workflow_grids_truth(c, ngrids, noop):
+@mark.parametrize("truth_type", [TruthType.GRID, TruthType.POINT])
+def test_workflow_grids_truth(c, ngrids, noop, truth_type):
+    truth_name = "GFS" if truth_type is TruthType.GRID else "PREPBUFR"
+    c.truth = replace(c.truth, name=truth_name, type=truth_type)
+    expected = ngrids if truth_type is TruthType.GRID else 0
     with patch.object(workflow, "_grid_grib", noop):
-        assert len(workflow.grids_truth(c=c).ref) == ngrids * 2
+        assert len(workflow.grids_truth(c=c).ref) == expected
 
 
 def test_workflow_ncobs(c, obs_info):
@@ -126,13 +145,12 @@ def test_workflow_plots(c, noop):
     with patch.object(workflow, "_plot", noop):
         node = workflow.plots(c=c)
     assert len(node.ref) == len(c.cycles.values) * sum(
-        len(list(workflow._stats_and_widths(c, varname)))
-        for varname, _ in workflow._varnames_and_levels(c)
+        len(list(workflow._stats_widths(c, varname))) for varname, _ in workflow._varnames_levels(c)
     )
 
 
 def test_workflow_stats(c, noop):
-    with patch.object(workflow, "_statreqs", return_value=[noop()]) as _statreqs:
+    with patch.object(workflow, "_stat_reqs", return_value=[noop()]) as _stat_reqs:
         node = workflow.stats(c=c)
     assert len(node.ref) == len(c.variables) + 1  # for 2x SPFH levels
 
@@ -423,7 +441,9 @@ def test_workflow__grib_index_file_eccodes(c, fakefs, logged, tc):
     grib.touch()
     with patch.object(workflow, "ec") as ec:
         ec.codes_index_write.side_effect = lambda _idx, p: Path(p).touch()
-        assert workflow._grib_index_file_eccodes(c=c, grib_path=grib, tc=tc).ready
+        assert workflow._grib_index_file_eccodes(
+            c=c, grib_path=grib, tc=tc, source=Source.TRUTH
+        ).ready
     yyyymmdd, hh, leadtime = tcinfo(tc)
     idx_path = c.paths.grids_truth / yyyymmdd / hh / leadtime / f"{grib.name}.ecidx"
     assert idx_path.is_file()
@@ -442,7 +462,9 @@ def test__workflow__grib_message_in_file(c, expected, fakefs, logged, msgs, node
         patch.object(workflow, "ec") as ec,
     ):
         ec.codes_new_from_index.side_effect = [object()] * msgs + [None]
-        node = workflow._grib_message_in_file(c=c, path=grib_path, tc=tc, var=testvars["gh"])
+        node = workflow._grib_message_in_file(
+            c=c, path=grib_path, tc=tc, var=testvars["gh"], source=Source.TRUTH
+        )
         assert node.ready is expected
         if msgs == 2:
             assert logged("Found 2 GRIB messages")
@@ -455,7 +477,7 @@ def test_workflow__grid_grib__local(config_data, fakefs, gen_config, node, tc, t
     with patch.object(
         workflow, "_grib_message_in_file", return_value=node
     ) as _grib_message_in_file:
-        assert workflow._grid_grib(c=c, tc=tc, var=testvars["t"]).ready
+        assert workflow._grid_grib(c=c, tc=tc, var=testvars["t"], source=Source.TRUTH).ready
         _grib_message_in_file.assert_called_once()
 
 
@@ -476,14 +498,14 @@ def test_workflow__grid_grib__remote(c, tc, testvars):
         yield Asset(idxdata, ready.is_set)
 
     with patch.object(workflow, "_grib_index_data_wgrib2", wraps=mock) as _grib_index_data_wgrib2:
-        node = workflow._grid_grib(c=c, tc=tc, var=testvars["t"])
+        node = workflow._grid_grib(c=c, tc=tc, var=testvars["t"], source=Source.TRUTH)
         path = node.ref
         assert not path.exists()
         ready.set()
         with patch.object(workflow, "fetch") as fetch:
             fetch.side_effect = lambda taskname, url, path, headers: path.touch()  # noqa: ARG005
             path.parent.mkdir(parents=True, exist_ok=True)
-            workflow._grid_grib(c=c, tc=tc, var=testvars["t"])
+            workflow._grid_grib(c=c, tc=tc, var=testvars["t"], source=Source.TRUTH)
         assert path.exists()
     yyyymmdd = tc.yyyymmdd
     hh = tc.hh
@@ -534,7 +556,7 @@ def test_workflow__missing(fakefs):
 def test_workflow__netcdf_from_obs(c, tc):
     yyyymmdd, hh, _ = tcinfo(tc)
     url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
-    c.truth = replace(c.truth, type="point", url=url)
+    c.truth = replace(c.truth, name="PREPBUFR", type="point", url=url)
     path = c.paths.obs / yyyymmdd / hh / f"gdas.{yyyymmdd}.t{hh}z.prepbufr.nc"
     assert not path.is_file()
     prepbufr = path.with_suffix(".nr")
@@ -567,13 +589,14 @@ def test_workflow__plot(c, dictkey, fakefs, fs):
         yield Asset(fakefs / f"{x}.stat", lambda: True)
 
     fs.add_real_directory(os.environ["CONDA_PREFIX"])
+    fs.add_real_file(resource_path("info.json"))
     varname, level, dfs, stat, width = TESTDATA[dictkey]
     with (
-        patch.object(workflow, "_statreqs") as _statreqs,
+        patch.object(workflow, "_stat_reqs") as _stat_reqs,
         patch.object(workflow, "_prepare_plot_data") as _prepare_plot_data,
         patch("matplotlib.pyplot.xticks") as xticks,
     ):
-        _statreqs.return_value = [_stat("model1"), _stat("model2")]
+        _stat_reqs.return_value = [_stat("model1"), _stat("model2")]
         _prepare_plot_data.side_effect = dfs
         os.environ["MPLCONFIGDIR"] = str(fakefs)
         cycle = c.cycles.values[0]  # noqa: PD011
@@ -605,7 +628,7 @@ def test_workflow__polyfile(fakefs, tidy):
 
 @mark.parametrize("datafmt", [DataFormat.NETCDF, DataFormat.UNKNOWN])
 @mark.parametrize("mask", [True, False])
-@mark.parametrize("source", [Source.FORECAST, Source.TRUTH])
+@mark.parametrize("source", [Source.BASELINE, Source.FORECAST])
 def test_workflow__stats_vs_grid(c, datafmt, fakefs, mask, source, tc, testvars):
     if not mask:
         c.forecast._mask = None
@@ -644,32 +667,34 @@ def test_workflow__stats_vs_grid(c, datafmt, fakefs, mask, source, tc, testvars)
 
 
 @mark.parametrize("datafmt", [DataFormat.NETCDF, DataFormat.ZARR, DataFormat.UNKNOWN])
-def test_workflow__stats_vs_obs(c, datafmt, fakefs, tc, testvars):
+@mark.parametrize("source", [Source.BASELINE, Source.FORECAST])
+def test_workflow__stats_vs_obs(c, datafmt, fakefs, source, tc, testvars):
     @external
     def mock(*_args, **_kwargs):
         yield "mock"
         yield Asset(Path("/some/file"), lambda: True)
 
-    taskfunc = workflow._stats_vs_obs
     url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
-    c.truth = replace(c.truth, type="point", url=url)
+    c.truth = replace(c.truth, name="PREPBUFR", type="point", url=url)
     rundir = fakefs / "run" / "stats" / "19700101" / "00" / "000"
-    taskname = "Stats vs obs for truth 2t-heightAboveGround-0002 at 19700101 00Z 000"
-    kwargs = dict(c=c, varname="T2M", tc=tc, var=testvars["2t"], prefix="foo", source=Source.TRUTH)
+    var = testvars["2t"]
+    taskname = "Stats vs obs for %s %s at 19700101 00Z 000" % (source.name.lower(), var)
+    kwargs = dict(c=c, varname="T2M", tc=tc, var=var, prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = taskfunc(**kwargs, dry_run=True).ref
+        stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
         assert not cfgfile.is_file()
         assert not runscript.is_file()
         with (
+            patch.object(workflow, "_grid_grib", mock),
             patch.object(workflow, "_grid_nc", mock),
             patch.object(workflow, "_netcdf_from_obs", mock),
             patch.object(workflow, "mpexec", side_effect=lambda *_: stat.touch()) as mpexec,
         ):
             stat.parent.mkdir(parents=True)
-            taskfunc(**kwargs)
+            workflow._stats_vs_obs(**kwargs)
         if datafmt != DataFormat.UNKNOWN:
             assert stat.is_file()
             assert cfgfile.is_file()
@@ -690,6 +715,48 @@ def test_workflow__enforce_point_truth_type(c):
         workflow._enforce_point_truth_type(c=c, taskname="foo")
     expected = "foo: This task requires that config value truth.type be set to 'point'"
     assert str(e.value) == expected
+
+
+@mark.parametrize(
+    ("fmt", "path"),
+    [
+        (DataFormat.NETCDF, "/path/to/a.nc"),
+        (DataFormat.ZARR, "/path/to/a.zarr"),
+    ],
+)
+def test_workflow__forecast_grid(c, fmt, path, tc, testvars):
+    with patch.object(workflow, "classify_data_format", return_value=fmt):
+        req, datafmt = workflow._forecast_grid(
+            path=path, c=c, varname="foo", tc=tc, var=testvars["2t"]
+        )
+    # For netCDF and Zarr forecast datasets, the grid will be extracted from the dataset and CF-
+    # decorated, so the requirement is a _grid_nc task, whose taskname is "Forecast grid ..."
+    assert req.taskname.startswith("Forecast grid")
+    assert datafmt == fmt
+
+
+def test_workflow__forecast_grid__grib(c, tc, testvars):
+    path = Path("/path/to/a.grib2")
+    with patch.object(workflow, "classify_data_format", return_value=DataFormat.GRIB):
+        req, datafmt = workflow._forecast_grid(
+            path=path, c=c, varname="foo", tc=tc, var=testvars["2t"]
+        )
+    # For GRIB forecast datasets, the entire GRIB file will be accessed by MET, so the requirement
+    # is an existing local path.
+    assert req.taskname.startswith("Existing path")
+    assert datafmt == DataFormat.GRIB
+
+
+def test_workflow__forecast_grid__missing(c, tc, testvars):
+    path = Path("/path/to/a.grib2")
+    with patch.object(workflow, "classify_data_format", return_value=DataFormat.UNKNOWN):
+        req, datafmt = workflow._forecast_grid(
+            path=path, c=c, varname="foo", tc=tc, var=testvars["2t"]
+        )
+    # For missing forecast datasets, the requirement is a missing-file external task that blocks
+    # further execution.
+    assert req.taskname.startswith("Missing path")
+    assert datafmt == DataFormat.UNKNOWN
 
 
 def test_workflow__meta(c):
@@ -718,6 +785,14 @@ def test_workflow__prepare_plot_data(dictkey):
         assert tdf["INTERP_PNTS"].eq(width**2).all()
 
 
+def test_workflow__prepbufr(fakefs):
+    assert not workflow._prepbufr(url="https://example.com/prepbufr.nr", outdir=fakefs).ready
+    path = fakefs / "prepbufr.nr"
+    path.touch()
+    assert workflow._prepbufr(url=str(path), outdir=fakefs).ready
+    assert workflow._prepbufr(url=f"file://{path}", outdir=fakefs).ready
+
+
 def test_workflow__regrid_width(c):
     c.regrid = replace(c.regrid, method="BILIN")
     assert workflow._regrid_width(c=c) == 2
@@ -729,79 +804,39 @@ def test_workflow__regrid_width(c):
     assert str(e.value) == "Could not determine 'width' value for regrid method 'FOO'"
 
 
-@mark.parametrize(
-    ("fmt", "path"),
-    [
-        (DataFormat.NETCDF, "/path/to/a.nc"),
-        (DataFormat.ZARR, "/path/to/a.zarr"),
-    ],
-)
-def test_workflow__req_grid(c, fmt, path, tc, testvars):
-    with patch.object(workflow, "classify_data_format", return_value=fmt):
-        req, datafmt = workflow._req_grid(path=path, c=c, varname="foo", tc=tc, var=testvars["2t"])
-    # For netCDF and Zarr forecast datasets, the grid will be extracted from the dataset and CF-
-    # decorated, so the requirement is a _grid_nc task, whose taskname is "Forecast grid ..."
-    assert req.taskname.startswith("Forecast grid")
-    assert datafmt == fmt
-
-
-def test_workflow__req_grid__grib(c, tc, testvars):
-    path = Path("/path/to/a.grib2")
-    with patch.object(workflow, "classify_data_format", return_value=DataFormat.GRIB):
-        req, datafmt = workflow._req_grid(path=path, c=c, varname="foo", tc=tc, var=testvars["2t"])
-    # For GRIB forecast datasets, the entire GRIB file will be accessed by MET, so the requirement
-    # is an existing local path.
-    assert req.taskname.startswith("Existing path")
-    assert datafmt == DataFormat.GRIB
-
-
-def test_workflow__req_grid__missing(c, tc, testvars):
-    path = Path("/path/to/a.grib2")
-    with patch.object(workflow, "classify_data_format", return_value=DataFormat.UNKNOWN):
-        req, datafmt = workflow._req_grid(path=path, c=c, varname="foo", tc=tc, var=testvars["2t"])
-    # For missing forecast datasets, the requirement is a missing-file external task that blocks
-    # further execution.
-    assert req.taskname.startswith("Missing path")
-    assert datafmt == DataFormat.UNKNOWN
-
-
-def test_workflow__req_prepbufr(fakefs):
-    assert not workflow._req_prepbufr(url="https://example.com/prepbufr.nr", outdir=fakefs).ready
-    path = fakefs / "prepbufr.nr"
-    path.touch()
-    assert workflow._req_prepbufr(url=str(path), outdir=fakefs).ready
-    assert workflow._req_prepbufr(url=f"file://{path}", outdir=fakefs).ready
-
-
 @mark.parametrize("cycle", [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
-def test_workflow__statargs(c, statkit, cycle):
+def test_workflow__stat_args(c, statkit, cycle):
     with (
         patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
         patch.object(workflow, "gen_validtimes", return_value=[statkit.tc]),
     ):
-        statargs = workflow._statargs(
+        stat_args = workflow._stat_args(
             c=c,
             varname=statkit.varname,
             level=statkit.level,
             source=statkit.source,
             cycle=cycle,
         )
-    assert list(statargs) == [
+    assert list(stat_args) == [
         (c, statkit.varname, statkit.tc, statkit.var, statkit.prefix, statkit.source)
     ]
 
 
-@mark.parametrize("compare", [True, False])
+@mark.parametrize("baseline_name", ["HRRR", "truth", None])
 @mark.parametrize("cycle", [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
-def test_workflow__statreqs(c, compare, statkit, cycle):
-    c.truth = replace(c.truth, compare=compare)
+def test_workflow__stat_reqs(baseline_name, c, statkit, cycle):
+    c.baseline = replace(
+        c.baseline,
+        name=baseline_name,
+        url=None if baseline_name == "truth" else c.baseline.url,
+    )
     with (
         patch.object(workflow, "_stats_vs_grid") as _stats_vs_grid,
         patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
         patch.object(workflow, "gen_validtimes", return_value=[statkit.tc]),
     ):
-        reqs = workflow._statreqs(c=c, varname=statkit.varname, level=statkit.level, cycle=cycle)
-    n = 2 if compare else 1
+        reqs = workflow._stat_reqs(c=c, varname=statkit.varname, level=statkit.level, cycle=cycle)
+    n = 1 if baseline_name is None else 2
     assert len(reqs) == n
     assert _stats_vs_grid.call_count == n
     args = (c, statkit.varname, statkit.tc, statkit.var)
@@ -810,22 +845,16 @@ def test_workflow__statreqs(c, compare, statkit, cycle):
         f"forecast_gh_{statkit.level_type}_{statkit.level:04d}",
         Source.FORECAST,
     )
-    if compare:
-        assert _stats_vs_grid.call_args_list[1].args == (
-            *args,
-            f"gfs_gh_{statkit.level_type}_{statkit.level:04d}",
-            Source.TRUTH,
-        )
 
 
-def test_workflow__stats_and_widths(c):
-    assert list(workflow._stats_and_widths(c=c, varname="REFC")) == [
+def test_workflow__stats_widths(c):
+    assert list(workflow._stats_widths(c=c, varname="REFC")) == [
         ("FSS", 3),
         ("FSS", 5),
         ("FSS", 11),
         ("PODY", None),
     ]
-    assert list(workflow._stats_and_widths(c=c, varname="SPFH")) == [
+    assert list(workflow._stats_widths(c=c, varname="SPFH")) == [
         ("ME", None),
         ("RMSE", None),
     ]
@@ -835,14 +864,21 @@ def test_workflow__var(c, testvars):
     assert workflow._var(c=c, varname="HGT", level=900) == testvars["gh"]
 
 
-def test_workflow__varnames_and_levels(c):
-    assert list(workflow._varnames_and_levels(c=c)) == [
+def test_workflow__varnames_levels(c):
+    assert list(workflow._varnames_levels(c=c)) == [
         ("HGT", 900),
         ("REFC", None),
         ("SPFH", 900),
         ("SPFH", 1000),
         ("T2M", 2),
     ]
+
+
+def test_workflow__vars_varnames_times(c, ngrids):
+    result = list(workflow._vars_varnames_times(c=c))
+    assert len(result) == ngrids
+    for item in result:
+        assert tuple(map(type, item)) == (Var, str, TimeCoords)
 
 
 def test_workflow__vxvars(c, testvars):
@@ -873,7 +909,7 @@ def test_workflow__write_runscript(fakefs, tidy):
 @fixture
 def ngrids(c):
     n_validtimes = len(list(gen_validtimes(c.cycles, c.leadtimes)))
-    n_var_level_pairs = len(list(workflow._varnames_and_levels(c)))
+    n_var_level_pairs = len(list(workflow._varnames_levels(c)))
     return n_validtimes * n_var_level_pairs
 
 
@@ -881,7 +917,7 @@ def ngrids(c):
 def noop():
     @external
     def noop(*_args, **_kwargs):
-        yield "mock"
+        yield "noop"
         yield Asset(None, lambda: False)
 
     return noop
@@ -890,7 +926,7 @@ def noop():
 @fixture
 def obs_info(c):
     url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
-    c.truth = replace(c.truth, type="point", url=url)
+    c.truth = replace(c.truth, name="PREPBUFR", type="point", url=url)
     expected = [
         c.paths.obs / yyyymmdd / hh / f"gdas.{yyyymmdd}.t{hh}z.prepbufr.x"
         for (yyyymmdd, hh) in [

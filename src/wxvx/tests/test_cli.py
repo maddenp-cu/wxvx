@@ -96,6 +96,7 @@ def test_cli_main__task_list(caplog, switch, tidy):
         expected = """
         Available tasks:
           grids
+          grids_baseline
           grids_forecast
           grids_truth
           ncobs
@@ -220,7 +221,3 @@ def test_cli__process_args__only_show():
     with patch.object(cli, "_show_tasks") as _show_tasks:
         cli._process_args(args=args)
     _show_tasks.assert_not_called()
-
-
-def test_cli__version():
-    assert re.match(r"^version \d+\.\d+\.\d+ build \d+$", cli._version())

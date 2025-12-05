@@ -1,18 +1,23 @@
 import re
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-from pytest import fixture, raises
+from pytest import fixture, mark, raises
 from uwtools.api.config import get_yaml_config
 
 from wxvx import types
-from wxvx.tests.support import with_del, with_set
 from wxvx.util import WXVXError, resource_path
 
 # Fixtures
+
+
+@fixture
+def baseline(config_data):
+    return types.Baseline(**config_data["baseline"])
 
 
 @fixture
@@ -38,6 +43,7 @@ def leadtimes(config_data):
 @fixture
 def paths(config_data):
     return types.Paths(
+        grids_baseline=Path(config_data["paths"]["grids"]["baseline"]),
         grids_forecast=Path(config_data["paths"]["grids"]["forecast"]),
         grids_truth=Path(config_data["paths"]["grids"]["truth"]),
         obs=Path(config_data["paths"]["obs"]),
@@ -71,14 +77,36 @@ def test_types_validated_config(config_data, fs):
 
 def test_types_validated_config__fail_json_schema(config_data, fs, logged):
     fs.add_real_file(resource_path("config.jsonschema"))
-    yc = get_yaml_config(with_set(config_data, "foo", "truth", "type"))
+    config_data["truth"]["type"] = "foo"
+    yc = get_yaml_config(config_data)
     with raises(WXVXError) as e:
         types.validated_config(yc=yc)
     assert str(e.value) == "Config failed schema validation"
     assert logged(r"'foo' is not one of \['grid', 'point'\]")
 
 
-def test_types_Config(config_data, cycles, forecast, leadtimes, paths, regrid, truth):
+def test_types_Baseline(baseline, config_data):
+    obj = baseline
+    assert obj.name == "HRRR"
+    assert obj.url == "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2"
+    cfg = config_data["baseline"]
+    assert obj == types.Baseline(**cfg)
+    assert obj != types.Baseline(**{**cfg, "name": "GFS"})
+    assert obj != types.Baseline(**{**cfg, "url": "bar"})
+    assert types.Baseline(name="truth")
+    with raises(AssertionError):
+        types.Baseline(name="truth", url="should-not-be-defined")
+    with raises(WXVXError) as e:
+        types.Baseline(name="anything-else")
+    assert str(e.value).startswith("Set baseline.name to one of:")
+
+
+@mark.parametrize("baseline", [True, False])
+def test_types_Config(baseline, config_data, cycles, forecast, leadtimes, paths, regrid, truth):
+    if not baseline:
+        del config_data["baseline"]
+        del config_data["paths"]["grids"]["baseline"]
+        paths = replace(paths, grids_baseline=None)
     obj = types.Config(raw=config_data)
     assert hash(obj)
     assert obj.cycles == cycles
@@ -96,30 +124,72 @@ def test_types_Config(config_data, cycles, forecast, leadtimes, paths, regrid, t
         assert re.match(r"^Config(.*)$", f(obj))
 
 
-def test_types_Config__bad_paths_grids(config_data):
+def test_types_Config__bad_baseline_name_vs_truth_type(config_data):
+    del config_data["baseline"]["url"]
+    config_data["baseline"]["name"] = "truth"
+    config_data["truth"]["type"] = types.TruthType.POINT
+    config_data["truth"]["name"] = "PREPBUFR"
     with raises(WXVXError) as e:
-        types.Config(
-            raw=with_del(with_set(config_data, "grid", "truth", "type"), "paths", "grids", "truth")
-        )
-    assert str(e.value) == "Specify path.grids.truth when truth.type is 'grid'"
+        types.Config(raw=config_data)
+    assert str(e.value) == "Settings baseline.name 'truth' and truth.type 'point' are incompatible"
+
+
+def test_types_Config__bad_paths_grids_baseline(config_data):
+    config_data["baseline"]["name"] = "HRRR"
+    del config_data["paths"]["grids"]["baseline"]
+    with raises(WXVXError) as e:
+        types.Config(raw=config_data)
+    assert str(e.value) == "Specify paths.grids.baseline when baseline.name is not 'truth'"
+
+
+def test_types_Config__bad_paths_grids_truth(config_data):
+    config_data["truth"]["type"] = "grid"
+    del config_data["paths"]["grids"]["truth"]
+    with raises(WXVXError) as e:
+        types.Config(raw=config_data)
+    assert str(e.value) == "Specify paths.grids.truth when truth.type is 'grid'"
 
 
 def test_types_Config__bad_paths_obs(config_data):
+    config_data["truth"]["type"] = "point"
+    config_data["truth"]["name"] = "PREPBUFR"
+    del config_data["paths"]["obs"]
     with raises(WXVXError) as e:
-        types.Config(raw=with_del(with_set(config_data, "point", "truth", "type"), "paths", "obs"))
-    assert str(e.value) == "Specify path.obs when truth.type is 'point'"
+        types.Config(raw=config_data)
+    assert str(e.value) == "Specify paths.obs when truth.type is 'point'"
 
 
 def test_types_Config__bad_regrid_to(config_data):
+    config_data["regrid"]["to"] = "truth"
     with raises(WXVXError) as e:
-        types.Config(raw=with_set(config_data, "truth", "regrid", "to"))
+        types.Config(raw=config_data)
     assert str(e.value) == "Cannot regrid to observations per regrid.to config value"
 
 
-def test_types_Config__bad_same_names(config_data):
+@mark.parametrize(
+    ("baseline", "forecast", "truth"),
+    [("GFS", "GFS", "HRRR"), ("GFS", "HRRR", "GFS"), ("HRRR", "GFS", "GFS")],
+)
+def test_types_Config__bad_duplicate_names(baseline, config_data, forecast, truth):
+    config_data["baseline"]["name"] = baseline
+    config_data["forecast"]["name"] = forecast
+    config_data["truth"]["name"] = truth
     with raises(WXVXError) as e:
-        types.Config(raw=with_set(config_data, config_data["truth"]["name"], "forecast", "name"))
-    assert str(e.value) == "forecast.name and truth.name must differ"
+        types.Config(raw=config_data)
+    assert str(e.value) == "Distinct baseline.name (if set), forecast.name, and truth.name required"
+
+
+@mark.parametrize("ignore", [True, False])
+def test_types_Config__paths_grids_baseline_ignored(config_data, ignore, logged):
+    config_data["baseline"]["name"] = "truth"
+    del config_data["baseline"]["url"]
+    if ignore:
+        config_data["paths"]["grids"]["baseline"] = "/some/path"
+    else:
+        del config_data["paths"]["grids"]["baseline"]
+    types.Config(raw=config_data)
+    warned = logged("Ignoring paths.grids.baseline when baseline.name is 'truth'")
+    assert warned if ignore else not warned
 
 
 def test_types_Coords(config_data, coords):
@@ -207,10 +277,12 @@ def test_types_Leadtimes():
 
 def test_types_Paths(paths, config_data):
     obj = paths
+    assert obj.grids_baseline == Path(config_data["paths"]["grids"]["baseline"])
     assert obj.grids_forecast == Path(config_data["paths"]["grids"]["forecast"])
     assert obj.grids_truth == Path(config_data["paths"]["grids"]["truth"])
     assert obj.run == Path(config_data["paths"]["run"])
     cfg = {
+        "grids_baseline": Path(config_data["paths"]["grids"]["baseline"]),
         "grids_forecast": Path(config_data["paths"]["grids"]["forecast"]),
         "grids_truth": Path(config_data["paths"]["grids"]["truth"]),
         "obs": Path(config_data["paths"]["obs"]),
@@ -258,15 +330,37 @@ def test_types_ToGrid():
     assert types.ToGrid(val="forecast") != types.ToGrid(val="truth")
 
 
-def test_types_Truth(config_data, truth):
+@mark.parametrize("truth_type", ["grid", types.TruthType.GRID])
+def test_types_Truth(config_data, truth, truth_type):
     obj = truth
     assert obj.name == "GFS"
     assert obj.url == "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2"
     cfg = config_data["truth"]
+    cfg["type"] = truth_type
     other1 = types.Truth(**cfg)
     assert obj == other1
-    other2 = types.Truth(**{**cfg, "name": "foo"})
+    other2 = types.Truth(**{**cfg, "name": "HRRR"})
     assert obj != other2
+
+
+@mark.parametrize(
+    ("truth_name", "truth_type"),
+    [
+        *[("GFS", x) for x in (types.TruthType.POINT, "point")],
+        *[("PREPBUFR", x) for x in (types.TruthType.GRID, "grid")],
+        ("foo", types.TruthType.GRID),
+    ],
+)
+def test_types_Truth__bad_name(truth_name, truth_type):
+    with raises(WXVXError) as e:
+        types.Truth(name=truth_name, type=truth_type, url="http://some.url")
+    if truth_name == "GFS":
+        msg = "When truth.type is 'point' set truth.name to:"
+    elif truth_name == "PREPBUFR":
+        msg = "When truth.type is 'grid' set truth.name to:"
+    else:  # truth_name == "foo"
+        msg = "Set truth.name to one of:"
+    assert str(e.value).startswith(msg)
 
 
 def test_types_VarMeta():

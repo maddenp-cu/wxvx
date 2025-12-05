@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from wxvx.times import TimeCoords
 
 _POOL_LOCK = Lock()
-_STATE = {}
+_STATE: dict = {}
 
 pkgname = __name__.split(".", maxsplit=1)[0]
 
@@ -131,7 +132,7 @@ def mpexec(cmd: str, rundir: Path, taskname: str, env: dict | None = None) -> No
         kwargs["env"] = env
     with _POOL_LOCK:
         if "pool" not in _STATE:
-            _STATE["pool"] = Pool(initializer=signal, initargs=(SIGINT, SIG_IGN))
+            _initpool()
     _STATE["pool"].apply(run, [cmd], kwargs)
 
 
@@ -172,3 +173,12 @@ def to_timedelta(value: str | int) -> timedelta:
     keys = ["hours", "minutes", "seconds"]
     args = dict(zip(keys, map(int, value.split(":")), strict=False))
     return timedelta(**args)
+
+
+def version() -> str:
+    info = json.loads(resource("info.json"))
+    return "version %s build %s" % (info["version"], info["buildnum"])
+
+
+def _initpool() -> None:
+    _STATE["pool"] = Pool(initializer=signal, initargs=(SIGINT, SIG_IGN))

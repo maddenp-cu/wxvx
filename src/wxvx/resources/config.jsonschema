@@ -25,6 +25,44 @@
   },
   "additionalProperties": false,
   "properties": {
+    "baseline": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "required": [
+              "url"
+            ]
+          },
+          "if": {
+            "properties": {
+              "name": {
+                "const": "truth"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "url"
+              ]
+            }
+          }
+        }
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "cycles": {
       "anyOf": [
         {
@@ -276,6 +314,9 @@
         "grids": {
           "additionalProperties": false,
           "properties": {
+            "baseline": {
+              "type": "string"
+            },
             "forecast": {
               "type": "string"
             },
@@ -283,6 +324,9 @@
               "type": "string"
             }
           },
+          "required": [
+            "forecast"
+          ],
           "type": "object"
         },
         "obs": {
@@ -331,9 +375,6 @@
     "truth": {
       "additionalProperties": false,
       "properties": {
-        "compare": {
-          "type": "boolean"
-        },
         "name": {
           "type": "string"
         },
@@ -348,7 +389,6 @@
         }
       },
       "required": [
-        "compare",
         "name",
         "type",
         "url"

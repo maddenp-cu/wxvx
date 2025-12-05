@@ -62,6 +62,19 @@ def test_schema_defs_timedelta(fs):
     assert ok("0:0:7200")
 
 
+def test_schema_baseline(logged, config_data, fs):
+    ok = validator(fs, "properties", "baseline")
+    config = config_data["baseline"]
+    # Basic correctness:
+    assert ok(config)
+    # The "name" property's value can be "truth", in which case "url" must not be set:
+    assert not ok(with_set(config, "truth", "name"))
+    assert ok(with_del(with_set(config, "truth", "name"), "url"))
+    # If name is not "truth", URL must be specified:
+    assert not ok(with_del(with_set(config, "GFS", "name"), "url"))
+    assert logged("'url' is a required property")
+
+
 def test_schema_cycles(logged, config_data, fs, utc):
     ok = validator(fs, "properties", "cycles")
     config = config_data["cycles"]
@@ -247,6 +260,13 @@ def test_schema_paths_grids(config_data, fs, logged):
     for key in ["forecast", "truth"]:
         assert not ok(with_set(config, None, key))
         assert logged("None is not of type 'string'")
+    # Some values are required:
+    for key in ["forecast"]:
+        assert not ok(with_del(config, key))
+        assert logged(f"'{key}' is a required property")
+    # Some values are optional:
+    for key in ["baseline"]:
+        assert ok(with_del(config, key))
 
 
 def test_schema_regrid(logged, config_data, fs):
@@ -275,16 +295,12 @@ def test_schema_truth(logged, config_data, fs):
     # Basic correctness:
     assert ok(config)
     # Certain top-level keys are required:
-    for key in ["compare", "name", "type", "url"]:
+    for key in ["name", "type", "url"]:
         assert not ok(with_del(config, key))
         assert logged(f"'{key}' is a required property")
     # Additional keys are not allowed:
     assert not ok(with_set(config, 42, "n"))
     assert logged("'n' was unexpected")
-    # Some keys have bool values:
-    for key in ["compare"]:
-        assert not ok(with_set(config, None, key))
-        assert logged("None is not of type 'boolean'")
     # Some keys have string values:
     for key in ["name", "url"]:
         assert not ok(with_set(config, None, key))
