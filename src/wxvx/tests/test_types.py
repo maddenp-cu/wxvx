@@ -10,6 +10,7 @@ from pytest import fixture, mark, raises
 from uwtools.api.config import get_yaml_config
 
 from wxvx import types
+from wxvx.strings import EC, MET, S
 from wxvx.util import WXVXError, resource_path
 
 # Fixtures
@@ -17,53 +18,53 @@ from wxvx.util import WXVXError, resource_path
 
 @fixture
 def baseline(config_data):
-    return types.Baseline(**config_data["baseline"])
+    return types.Baseline(**config_data[S.baseline])
 
 
 @fixture
 def coords(config_data):
-    return types.Coords(**config_data["forecast"]["coords"])
+    return types.Coords(**config_data[S.forecast][S.coords])
 
 
 @fixture
 def cycles(config_data):
-    return types.Cycles(raw=config_data["cycles"])
+    return types.Cycles(raw=config_data[S.cycles])
 
 
 @fixture
 def forecast(config_data):
-    return types.Forecast(**config_data["forecast"])
+    return types.Forecast(**config_data[S.forecast])
 
 
 @fixture
 def leadtimes(config_data):
-    return types.Leadtimes(raw=config_data["leadtimes"])
+    return types.Leadtimes(raw=config_data[S.leadtimes])
 
 
 @fixture
 def paths(config_data):
     return types.Paths(
-        grids_baseline=Path(config_data["paths"]["grids"]["baseline"]),
-        grids_forecast=Path(config_data["paths"]["grids"]["forecast"]),
-        grids_truth=Path(config_data["paths"]["grids"]["truth"]),
-        obs=Path(config_data["paths"]["obs"]),
-        run=Path(config_data["paths"]["run"]),
+        grids_baseline=Path(config_data[S.paths][S.grids][S.baseline]),
+        grids_forecast=Path(config_data[S.paths][S.grids][S.forecast]),
+        grids_truth=Path(config_data[S.paths][S.grids][S.truth]),
+        obs=Path(config_data[S.paths][S.obs]),
+        run=Path(config_data[S.paths][S.run]),
     )
 
 
 @fixture
 def regrid(config_data):
-    return types.Regrid(**config_data["regrid"])
+    return types.Regrid(**config_data[S.regrid])
 
 
 @fixture
 def time(config_data):
-    return types.Time(**config_data["forecast"]["coords"]["time"])
+    return types.Time(**config_data[S.forecast][S.coords][S.time])
 
 
 @fixture
 def truth(config_data):
-    return types.Truth(**config_data["truth"])
+    return types.Truth(**config_data[S.truth])
 
 
 # Tests
@@ -77,7 +78,7 @@ def test_types_validated_config(config_data, fs):
 
 def test_types_validated_config__fail_json_schema(config_data, fs, logged):
     fs.add_real_file(resource_path("config.jsonschema"))
-    config_data["truth"]["type"] = "foo"
+    config_data[S.truth][S.type] = "foo"
     yc = get_yaml_config(config_data)
     with raises(WXVXError) as e:
         types.validated_config(yc=yc)
@@ -87,25 +88,25 @@ def test_types_validated_config__fail_json_schema(config_data, fs, logged):
 
 def test_types_Baseline(baseline, config_data):
     obj = baseline
-    assert obj.name == "HRRR"
+    assert obj.name == S.HRRR
     assert obj.url == "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2"
-    cfg = config_data["baseline"]
+    cfg = config_data[S.baseline]
     assert obj == types.Baseline(**cfg)
-    assert obj != types.Baseline(**{**cfg, "name": "GFS"})
-    assert obj != types.Baseline(**{**cfg, "url": "bar"})
-    assert types.Baseline(name="truth")
+    assert obj != types.Baseline(**{**cfg, S.name: S.GFS})
+    assert obj != types.Baseline(**{**cfg, S.url: "bar"})
+    assert types.Baseline(name=S.truth)
     with raises(AssertionError):
-        types.Baseline(name="truth", url="should-not-be-defined")
+        types.Baseline(name=S.truth, url="should-not-be-defined")
     with raises(WXVXError) as e:
         types.Baseline(name="anything-else")
     assert str(e.value).startswith("Set baseline.name to one of:")
 
 
-@mark.parametrize("baseline", [True, False])
+@mark.parametrize(S.baseline, [True, False])
 def test_types_Config(baseline, config_data, cycles, forecast, leadtimes, paths, regrid, truth):
     if not baseline:
-        del config_data["baseline"]
-        del config_data["paths"]["grids"]["baseline"]
+        del config_data[S.baseline]
+        del config_data[S.paths][S.grids][S.baseline]
         paths = replace(paths, grids_baseline=None)
     obj = types.Config(raw=config_data)
     assert hash(obj)
@@ -115,7 +116,7 @@ def test_types_Config(baseline, config_data, cycles, forecast, leadtimes, paths,
     assert obj.paths == paths
     assert obj.regrid == regrid
     assert obj.truth == truth
-    assert obj.variables == config_data["variables"]
+    assert obj.variables == config_data[S.variables]
     other = types.Config(raw=config_data)
     assert obj == other
     other.variables = {}
@@ -125,55 +126,55 @@ def test_types_Config(baseline, config_data, cycles, forecast, leadtimes, paths,
 
 
 def test_types_Config__bad_baseline_name_vs_truth_type(config_data):
-    del config_data["baseline"]["url"]
-    config_data["baseline"]["name"] = "truth"
-    config_data["truth"]["type"] = types.TruthType.POINT
-    config_data["truth"]["name"] = "PREPBUFR"
+    del config_data[S.baseline][S.url]
+    config_data[S.baseline][S.name] = S.truth
+    config_data[S.truth][S.type] = types.TruthType.POINT
+    config_data[S.truth][S.name] = S.PREPBUFR
     with raises(WXVXError) as e:
         types.Config(raw=config_data)
     assert str(e.value) == "Settings baseline.name 'truth' and truth.type 'point' are incompatible"
 
 
 def test_types_Config__bad_paths_grids_baseline(config_data):
-    config_data["baseline"]["name"] = "HRRR"
-    del config_data["paths"]["grids"]["baseline"]
+    config_data[S.baseline][S.name] = S.HRRR
+    del config_data[S.paths][S.grids][S.baseline]
     with raises(WXVXError) as e:
         types.Config(raw=config_data)
     assert str(e.value) == "Specify paths.grids.baseline when baseline.name is not 'truth'"
 
 
 def test_types_Config__bad_paths_grids_truth(config_data):
-    config_data["truth"]["type"] = "grid"
-    del config_data["paths"]["grids"]["truth"]
+    config_data[S.truth][S.type] = S.grid
+    del config_data[S.paths][S.grids][S.truth]
     with raises(WXVXError) as e:
         types.Config(raw=config_data)
     assert str(e.value) == "Specify paths.grids.truth when truth.type is 'grid'"
 
 
 def test_types_Config__bad_paths_obs(config_data):
-    config_data["truth"]["type"] = "point"
-    config_data["truth"]["name"] = "PREPBUFR"
-    del config_data["paths"]["obs"]
+    config_data[S.truth][S.type] = S.point
+    config_data[S.truth][S.name] = S.PREPBUFR
+    del config_data[S.paths][S.obs]
     with raises(WXVXError) as e:
         types.Config(raw=config_data)
     assert str(e.value) == "Specify paths.obs when truth.type is 'point'"
 
 
 def test_types_Config__bad_regrid_to(config_data):
-    config_data["regrid"]["to"] = "truth"
+    config_data[S.regrid][S.to] = S.truth
     with raises(WXVXError) as e:
         types.Config(raw=config_data)
     assert str(e.value) == "Cannot regrid to observations per regrid.to config value"
 
 
 @mark.parametrize(
-    ("baseline", "forecast", "truth"),
-    [("GFS", "GFS", "HRRR"), ("GFS", "HRRR", "GFS"), ("HRRR", "GFS", "GFS")],
+    (S.baseline, S.forecast, S.truth),
+    [(S.GFS, S.GFS, S.HRRR), (S.GFS, S.HRRR, S.GFS), (S.HRRR, S.GFS, S.GFS)],
 )
 def test_types_Config__bad_duplicate_names(baseline, config_data, forecast, truth):
-    config_data["baseline"]["name"] = baseline
-    config_data["forecast"]["name"] = forecast
-    config_data["truth"]["name"] = truth
+    config_data[S.baseline][S.name] = baseline
+    config_data[S.forecast][S.name] = forecast
+    config_data[S.truth][S.name] = truth
     with raises(WXVXError) as e:
         types.Config(raw=config_data)
     assert str(e.value) == "Distinct baseline.name (if set), forecast.name, and truth.name required"
@@ -181,12 +182,12 @@ def test_types_Config__bad_duplicate_names(baseline, config_data, forecast, trut
 
 @mark.parametrize("ignore", [True, False])
 def test_types_Config__paths_grids_baseline_ignored(config_data, ignore, logged):
-    config_data["baseline"]["name"] = "truth"
-    del config_data["baseline"]["url"]
+    config_data[S.baseline][S.name] = S.truth
+    del config_data[S.baseline][S.url]
     if ignore:
-        config_data["paths"]["grids"]["baseline"] = "/some/path"
+        config_data[S.paths][S.grids][S.baseline] = "/some/path"
     else:
-        del config_data["paths"]["grids"]["baseline"]
+        del config_data[S.paths][S.grids][S.baseline]
     types.Config(raw=config_data)
     warned = logged("Ignoring paths.grids.baseline when baseline.name is 'truth'")
     assert warned if ignore else not warned
@@ -200,10 +201,10 @@ def test_types_Coords(config_data, coords):
     assert obj.longitude == "longitude"
     assert obj.time.inittime == "time"
     assert obj.time.leadtime == "lead_time"
-    cfg = config_data["forecast"]["coords"]
-    other1 = types.Coords(**{**cfg, "time": types.Time(inittime="time", leadtime="lead_time")})
+    cfg = config_data[S.forecast][S.coords]
+    other1 = types.Coords(**{**cfg, S.time: types.Time(inittime="time", leadtime="lead_time")})
     assert obj == other1
-    other2 = types.Coords(**{**cfg, "latitude": "lat"})
+    other2 = types.Coords(**{**cfg, S.latitude: "lat"})
     assert obj != other2
 
 
@@ -212,8 +213,8 @@ def test_types_Cycles():
     ts2dt = lambda s: datetime.fromisoformat(s)
     expected = [ts2dt(x) for x in (ts1, ts2, ts3)]
     x1 = types.Cycles(raw=[ts1, ts2, ts3])
-    x2 = types.Cycles(raw={"start": ts1, "step": td, "stop": ts3})
-    x3 = types.Cycles(raw={"start": ts1, "step": int(td), "stop": ts3})
+    x2 = types.Cycles(raw={S.start: ts1, S.step: td, S.stop: ts3})
+    x3 = types.Cycles(raw={S.start: ts1, S.step: int(td), S.stop: ts3})
     assert x1.values == expected
     assert types.Cycles(raw=[ts2, ts3, ts1]).values == expected  # order invariant
     assert types.Cycles(raw=[ts2dt(ts1), ts2dt(ts2), ts2dt(ts3)]).values == expected
@@ -239,23 +240,23 @@ def test_types_Forecast(config_data, forecast):
     assert obj.coords.time.leadtime == "lead_time"
     assert obj.name == "Forecast"
     assert obj.path == "/path/to/forecast-{{ yyyymmdd }}-{{ hh }}-{{ '%03d' % fh }}.nc"
-    cfg = config_data["forecast"]
+    cfg = config_data[S.forecast]
     other1 = types.Forecast(**cfg)
     assert obj == other1
-    other2 = types.Forecast(**{**cfg, "name": "foo"})
+    other2 = types.Forecast(**{**cfg, S.name: "foo"})
     assert obj != other2
     cfg_no_proj = deepcopy(cfg)
-    del cfg_no_proj["projection"]
+    del cfg_no_proj[S.projection]
     default = types.Forecast(**cfg_no_proj)
-    assert default.projection == {"proj": "latlon"}
+    assert default.projection == {S.proj: S.latlon}
 
 
 def test_types_Leadtimes():
     lt1, lt2, lt3, td = "3", "6", "9", "3"
     expected = [timedelta(hours=int(x)) for x in (lt1, lt2, lt3)]
     x1 = types.Leadtimes(raw=[lt1, lt2, lt3])
-    x2 = types.Leadtimes(raw={"start": lt1, "step": td, "stop": lt3})
-    x3 = types.Leadtimes(raw={"start": int(lt1), "step": int(td), "stop": int(lt3)})
+    x2 = types.Leadtimes(raw={S.start: lt1, S.step: td, S.stop: lt3})
+    x3 = types.Leadtimes(raw={S.start: int(lt1), S.step: int(td), S.stop: int(lt3)})
     assert x1.values == expected
     assert types.Leadtimes(raw=[lt2, lt3, lt1]).values == expected  # order invariant
     assert types.Leadtimes(raw=[int(lt1), int(lt2), int(lt3)]).values == expected
@@ -277,32 +278,32 @@ def test_types_Leadtimes():
 
 def test_types_Paths(paths, config_data):
     obj = paths
-    assert obj.grids_baseline == Path(config_data["paths"]["grids"]["baseline"])
-    assert obj.grids_forecast == Path(config_data["paths"]["grids"]["forecast"])
-    assert obj.grids_truth == Path(config_data["paths"]["grids"]["truth"])
-    assert obj.run == Path(config_data["paths"]["run"])
+    assert obj.grids_baseline == Path(config_data[S.paths][S.grids][S.baseline])
+    assert obj.grids_forecast == Path(config_data[S.paths][S.grids][S.forecast])
+    assert obj.grids_truth == Path(config_data[S.paths][S.grids][S.truth])
+    assert obj.run == Path(config_data[S.paths][S.run])
     cfg = {
-        "grids_baseline": Path(config_data["paths"]["grids"]["baseline"]),
-        "grids_forecast": Path(config_data["paths"]["grids"]["forecast"]),
-        "grids_truth": Path(config_data["paths"]["grids"]["truth"]),
-        "obs": Path(config_data["paths"]["obs"]),
-        "run": Path(config_data["paths"]["run"]),
+        S.grids_baseline: Path(config_data[S.paths][S.grids][S.baseline]),
+        S.grids_forecast: Path(config_data[S.paths][S.grids][S.forecast]),
+        S.grids_truth: Path(config_data[S.paths][S.grids][S.truth]),
+        S.obs: Path(config_data[S.paths][S.obs]),
+        S.run: Path(config_data[S.paths][S.run]),
     }
     other1 = types.Paths(**cfg)
     assert obj == other1
-    cfg["run"] = Path("/other/path")
+    cfg[S.run] = Path("/other/path")
     other2 = types.Paths(**cfg)
     assert obj != other2
 
 
 def test_types_Regrid(regrid, config_data):
     obj = regrid
-    assert obj.method == "NEAREST"
+    assert obj.method == MET.NEAREST
     assert str(obj.to) == types.ToGridVal.FCST.name
-    cfg = config_data["regrid"]
+    cfg = config_data[S.regrid]
     other1 = types.Regrid(**cfg)
     assert obj == other1
-    other2 = types.Regrid(**{**cfg, "to": "truth"})
+    other2 = types.Regrid(**{**cfg, S.to: S.truth})
     assert obj != other2
     assert str(other2.to) == types.ToGridVal.OBS.name
 
@@ -312,51 +313,51 @@ def test_types_Time(config_data, time):
     assert hash(obj)
     assert obj.inittime == "time"
     assert obj.leadtime == "lead_time"
-    cfg = config_data["forecast"]["coords"]["time"]
+    cfg = config_data[S.forecast][S.coords][S.time]
     other1 = types.Time(**cfg)
     assert obj == other1
-    other2 = types.Time(**{**cfg, "inittime": "foo"})
+    other2 = types.Time(**{**cfg, S.inittime: "foo"})
     assert obj != other2
 
 
 def test_types_ToGrid():
     for f in [repr, str]:
         f = cast(Callable, f)
-        assert f(types.ToGrid(val="forecast")) == types.ToGridVal.FCST.name
-        assert f(types.ToGrid(val="truth")) == types.ToGridVal.OBS.name
+        assert f(types.ToGrid(val=S.forecast)) == types.ToGridVal.FCST.name
+        assert f(types.ToGrid(val=S.truth)) == types.ToGridVal.OBS.name
         assert f(types.ToGrid(val="G104")) == "G104"
     assert hash(types.ToGrid(val="G104")) == hash(types.ToGrid(val="G104"))
     assert types.ToGrid(val="G104") == types.ToGrid(val="G104")
-    assert types.ToGrid(val="forecast") != types.ToGrid(val="truth")
+    assert types.ToGrid(val=S.forecast) != types.ToGrid(val=S.truth)
 
 
-@mark.parametrize("truth_type", ["grid", types.TruthType.GRID])
+@mark.parametrize("truth_type", [S.grid, types.TruthType.GRID])
 def test_types_Truth(config_data, truth, truth_type):
     obj = truth
-    assert obj.name == "GFS"
+    assert obj.name == S.GFS
     assert obj.url == "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2"
-    cfg = config_data["truth"]
-    cfg["type"] = truth_type
+    cfg = config_data[S.truth]
+    cfg[S.type] = truth_type
     other1 = types.Truth(**cfg)
     assert obj == other1
-    other2 = types.Truth(**{**cfg, "name": "HRRR"})
+    other2 = types.Truth(**{**cfg, S.name: S.HRRR})
     assert obj != other2
 
 
 @mark.parametrize(
     ("truth_name", "truth_type"),
     [
-        *[("GFS", x) for x in (types.TruthType.POINT, "point")],
-        *[("PREPBUFR", x) for x in (types.TruthType.GRID, "grid")],
+        *[(S.GFS, x) for x in (types.TruthType.POINT, S.point)],
+        *[(S.PREPBUFR, x) for x in (types.TruthType.GRID, S.grid)],
         ("foo", types.TruthType.GRID),
     ],
 )
 def test_types_Truth__bad_name(truth_name, truth_type):
     with raises(WXVXError) as e:
         types.Truth(name=truth_name, type=truth_type, url="http://some.url")
-    if truth_name == "GFS":
+    if truth_name == S.GFS:
         msg = "When truth.type is 'point' set truth.name to:"
-    elif truth_name == "PREPBUFR":
+    elif truth_name == S.PREPBUFR:
         msg = "When truth.type is 'grid' set truth.name to:"
     else:  # truth_name == "foo"
         msg = "Set truth.name to one of:"
@@ -373,10 +374,10 @@ def test_types_VarMeta():
         cf_standard_name="unknown",
         cnt_thresh=[">15"],
         description="Composite Reflectivity",
-        level_type="atmosphere",
-        met_stats=["FSS", "PODY"],
-        name="refc",
-        nbrhd_shape="CIRCLE",
+        level_type=S.atmosphere,
+        met_stats=[MET.FSS, MET.PODY],
+        name=EC.refc,
+        nbrhd_shape=MET.CIRCLE,
         nbrhd_width=[3, 5, 11],
         units="dBZ",
     )
@@ -387,12 +388,12 @@ def test_types_VarMeta():
     for k, v in kwargs.items():
         fails(k, type(v)())
     # Must not have None values:
-    for k in ["cf_standard_name", "description", "level_type", "met_stats", "name", "units"]:
+    for k in ["cf_standard_name", "description", S.level_type, "met_stats", S.name, "units"]:
         fails(k, None)
     # Must not have unrecognized values:
     for k, v in [
-        ("level_type", "intergalactic"),
+        (S.level_type, "intergalactic"),
         ("met_stats", ["XYZ"]),
-        ("nbrhd_shape", "TRIANGLE"),
+        (MET.nbrhd_shape, "TRIANGLE"),
     ]:
         fails(k, v)

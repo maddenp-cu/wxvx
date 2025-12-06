@@ -25,6 +25,7 @@ from iotaa import Asset, Node, collection, external, task
 from wxvx import variables
 from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
+from wxvx.strings import MET, S
 from wxvx.times import TimeCoords, gen_validtimes, hh, tcinfo, yyyymmdd
 from wxvx.types import Cycles, Named, Source, TruthType
 from wxvx.util import (
@@ -71,7 +72,7 @@ def grids_baseline(c: Config):
     else:
         name, source = (
             (c.truth.name, Source.TRUTH)
-            if c.baseline.name == "truth"
+            if c.baseline.name == S.truth
             else (c.baseline.name, Source.BASELINE)
         )
         yield "Baseline grids for %s" % name
@@ -173,19 +174,24 @@ def _config_grid_stat(
     field_fcst, field_obs = _config_fields(c, varname, var, datafmt)
     meta = _meta(c, varname)
     config = {
-        "fcst": {"field": [field_fcst]},
-        "mask": {"grid": [] if polyfile else ["FULL"], "poly": [polyfile.ref] if polyfile else []},
-        "model": c.truth.name if source == Source.TRUTH else c.forecast.name,
-        "nc_pairs_flag": "FALSE",
-        "obs": {"field": [field_obs]},
-        "obtype": c.truth.name,
-        "output_flag": dict.fromkeys(sorted({LINETYPE[x] for x in meta.met_stats}), "BOTH"),
-        "output_prefix": f"{prefix}",
-        "regrid": {"method": c.regrid.method, "to_grid": c.regrid.to},
-        "tmp_dir": path.parent,
+        MET.fcst: {MET.field: [field_fcst]},
+        MET.mask: {
+            MET.grid: [] if polyfile else [MET.FULL],
+            MET.poly: [polyfile.ref] if polyfile else [],
+        },
+        MET.model: c.truth.name if source == Source.TRUTH else c.forecast.name,
+        MET.nc_pairs_flag: MET.FALSE,
+        MET.obs: {MET.field: [field_obs]},
+        MET.obtype: c.truth.name,
+        MET.output_flag: dict.fromkeys(sorted({LINETYPE[x] for x in meta.met_stats}), MET.BOTH),
+        MET.output_prefix: f"{prefix}",
+        MET.regrid: {MET.method: c.regrid.method, MET.to_grid: c.regrid.to},
+        MET.tmp_dir: path.parent,
     }
-    if nbrhd := {k: v for k, v in [("shape", meta.nbrhd_shape), ("width", meta.nbrhd_width)] if v}:
-        config["nbrhd"] = nbrhd
+    if nbrhd := {
+        k: v for k, v in [(MET.shape, meta.nbrhd_shape), (MET.width, meta.nbrhd_width)] if v
+    }:
+        config[MET.nbrhd] = nbrhd
     with atomic(path) as tmp:
         tmp.write_text("%s\n" % render_metconf(config))
 
@@ -200,13 +206,13 @@ def _config_pb2nc(c: Config, path: Path):
     # selection of obs from the netCDF file created by pb2nc.
     _type = ["min", "max", "range", "mean", "stdev", "median", "p80"]
     config: dict = {
-        "mask": {"grid": c.regrid.to if re.match(r"^G\d{3}$", str(c.regrid.to)) else ""},
-        "message_type": ["ADPSFC", "ADPUPA", "AIRCAR", "AIRCFT"],
-        "obs_bufr_var": ["POB", "QOB", "TOB", "UOB", "VOB", "ZOB"],
-        "obs_window": {"beg": -1800, "end": 1800},
-        "quality_mark_thresh": 9,
-        "time_summary": {"step": 3600, "width": 3600, "obs_var": [], "type": _type},
-        "tmp_dir": path.parent,
+        MET.mask: {MET.grid: c.regrid.to if re.match(r"^G\d{3}$", str(c.regrid.to)) else ""},
+        MET.message_type: ["ADPSFC", "ADPUPA", "AIRCAR", "AIRCFT"],
+        MET.obs_bufr_var: ["POB", "QOB", "TOB", "UOB", "VOB", "ZOB"],
+        MET.obs_window: {MET.beg: -1800, MET.end: 1800},
+        MET.quality_mark_thresh: 9,
+        MET.time_summary: {MET.step: 3600, MET.width: 3600, MET.obs_var: [], MET.type: _type},
+        MET.tmp_dir: path.parent,
     }
     with atomic(path) as tmp:
         tmp.write_text("%s\n" % render_metconf(config))
@@ -221,24 +227,28 @@ def _config_point_stat(
     yield Asset(path, path.is_file)
     yield None
     field_fcst, field_obs = _config_fields(c, varname, var, datafmt)
-    surface = var.level_type in ("heightAboveGround", "surface")
+    surface = var.level_type in (S.heightAboveGround, S.surface)
     sections = {Source.BASELINE: c.baseline, Source.FORECAST: c.forecast, Source.TRUTH: c.truth}
     config = {
-        "fcst": {"field": [field_fcst]},
-        "interp": {"shape": "SQUARE", "type": {"method": "BILIN", "width": 2}, "vld_thresh": 1.0},
-        "message_type": ["SFC" if surface else "ATM"],
-        "message_type_group_map": {"ATM": "ADPUPA,AIRCAR,AIRCFT", "SFC": "ADPSFC"},
-        "model": cast(Named, sections[source]).name,
-        "obs": {"field": [field_obs]},
-        "obs_window": {"beg": -900 if surface else -1800, "end": 900 if surface else 1800},
-        "output_flag": {"cnt": "BOTH"},
-        "output_prefix": f"{prefix}",
-        "regrid": {
-            "method": c.regrid.method,
-            "to_grid": c.regrid.to,
-            "width": _regrid_width(c),
+        MET.fcst: {MET.field: [field_fcst]},
+        MET.interp: {
+            MET.shape: MET.SQUARE,
+            MET.type: {MET.method: MET.BILIN, MET.width: 2},
+            MET.vld_thresh: 1.0,
         },
-        "tmp_dir": path.parent,
+        MET.message_type: [MET.SFC if surface else MET.ATM],
+        MET.message_type_group_map: {MET.ATM: "ADPUPA,AIRCAR,AIRCFT", MET.SFC: "ADPSFC"},
+        MET.model: cast(Named, sections[source]).name,
+        MET.obs: {MET.field: [field_obs]},
+        MET.obs_window: {MET.beg: -900 if surface else -1800, MET.end: 900 if surface else 1800},
+        MET.output_flag: {MET.cnt: MET.BOTH},
+        MET.output_prefix: f"{prefix}",
+        MET.regrid: {
+            MET.method: c.regrid.method,
+            MET.to_grid: c.regrid.to,
+            MET.width: _regrid_width(c),
+        },
+        MET.tmp_dir: path.parent,
     }
     with atomic(path) as tmp:
         tmp.write_text("%s\n" % render_metconf(config))
@@ -300,7 +310,7 @@ def _grib_index_file_eccodes(c: Config, grib_path: Path, tc: TimeCoords, source:
     yield taskname
     yield Asset(path, path.is_file)
     yield _existing(grib_path)
-    grib_index_keys = ["shortName", "typeOfLevel", "level"]
+    grib_index_keys = [S.shortName, S.typeOfLevel, S.level]
     idx = ec.codes_index_new_from_file(str(grib_path), grib_index_keys)
     with atomic(path) as tmp:
         ec.codes_index_write(idx, str(tmp))
@@ -317,9 +327,9 @@ def _grib_message_in_file(c: Config, path: Path, tc: TimeCoords, var: Var, sourc
     yield idx
     idx = ec.codes_index_read(str(idx.ref))
     for k, v in [
-        ("shortName", var.name),
-        ("typeOfLevel", var.level_type),
-        ("level", int(var.level) if var.level else 0),
+        (S.shortName, var.name),
+        (S.typeOfLevel, var.level_type),
+        (S.level, int(var.level) if var.level else 0),
     ]:
         ec.codes_index_select(idx, k, v)
     count = 0
@@ -335,7 +345,7 @@ def _grib_message_in_file(c: Config, path: Path, tc: TimeCoords, var: Var, sourc
 def _grid_grib(c: Config, tc: TimeCoords, var: Var, source: Source):
     assert source in (Source.BASELINE, Source.TRUTH)
     template = c.truth.url
-    if source is Source.BASELINE and c.baseline.name != "truth":
+    if source is Source.BASELINE and c.baseline.name != S.truth:
         template = cast(str, c.baseline.url)
     url = render(template, tc, context=c.raw)
     proximity, src = classify_url(url)
@@ -436,20 +446,20 @@ def _plot(
     cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
     taskname = f"Plot {desc}{' width ' + str(width) if width else ''} {stat} at {cyclestr}"
     yield taskname
-    rundir = c.paths.run / "plots" / yyyymmdd(cycle) / hh(cycle)
+    rundir = c.paths.run / S.plots / yyyymmdd(cycle) / hh(cycle)
     path = rundir / f"{var}-{stat}{'-width-' + str(width) if width else ''}-plot.png"
     yield Asset(path, path.is_file)
     reqs = _stat_reqs(c, varname, level, cycle)
     yield reqs
     leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]  # noqa: PD011
     plot_data = _prepare_plot_data(reqs, stat, width)
-    hue = "LABEL" if "LABEL" in plot_data.columns else "MODEL"
+    hue = MET.LABEL if MET.LABEL in plot_data.columns else MET.MODEL
     w = f"(width={width}) " if width else ""
     with _PLOT_LOCK, catch_warnings():
         simplefilter("ignore")
         sns.set(style="darkgrid")
         plt.figure(figsize=(10, 6), constrained_layout=True)
-        sns.lineplot(data=plot_data, x="FCST_LEAD", y=stat, hue=hue, marker="o", linewidth=2)
+        sns.lineplot(data=plot_data, x=MET.FCST_LEAD, y=stat, hue=hue, marker="o", linewidth=2)
         plt.title(
             "%s %s %s%s vs %s at %s" % (desc, stat, w, c.forecast.name, c.truth.name, cyclestr)
         )
@@ -480,7 +490,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     taskname = "Stats vs grid for %s %s %s" % (source.name.lower(), var, _at_validtime(tc))
     yield taskname
     yyyymmdd, hh, leadtime = tcinfo(tc)
-    rundir = c.paths.run / "stats" / yyyymmdd / hh / leadtime
+    rundir = c.paths.run / S.stats / yyyymmdd / hh / leadtime
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     template = "grid_stat_%s_%02d0000L_%s_%s0000V.stat"
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
@@ -495,7 +505,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     reqs = [fcst, obs]
     polyfile = None
     if mask := c.forecast.mask:
-        polyfile = _polyfile(c.paths.run / "stats" / "mask.poly", mask)
+        polyfile = _polyfile(c.paths.run / S.stats / "mask.poly", mask)
         reqs.append(polyfile)
     path_config = path.with_suffix(".config")
     config = _config_grid_stat(c, path_config, source, varname, var, prefix, datafmt, polyfile)
@@ -522,7 +532,7 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
     taskname = "Stats vs obs for %s %s %s" % (source.name.lower(), var, _at_validtime(tc))
     yield taskname
     yyyymmdd, hh, leadtime = tcinfo(tc)
-    rundir = c.paths.run / "stats" / yyyymmdd / hh / leadtime
+    rundir = c.paths.run / S.stats / yyyymmdd / hh / leadtime
     template = "point_stat_%s_%02d0000L_%s_%s0000V.stat"
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
@@ -569,17 +579,17 @@ def _config_fields(c: Config, varname: str, var: Var, datafmt: DataFormat):
     level_fcst, name_fcst = (
         (level_obs, varname_truth) if datafmt == DataFormat.GRIB else ("(0,0,*,*)", varname)
     )
-    field_fcst = {"level": [level_fcst], "name": name_fcst}
+    field_fcst = {S.level: [level_fcst], S.name: name_fcst}
     if datafmt != DataFormat.GRIB:
-        field_fcst["set_attr_level"] = level_obs
-    field_obs = {"level": [level_obs], "name": varname_truth}
+        field_fcst[MET.set_attr_level] = level_obs
+    field_obs = {S.level: [level_obs], S.name: varname_truth}
     meta = _meta(c, varname)
     if meta.cat_thresh:
         for x in field_fcst, field_obs:
-            x["cat_thresh"] = meta.cat_thresh
+            x[MET.cat_thresh] = meta.cat_thresh
     if meta.cnt_thresh:
         for x in field_fcst, field_obs:
-            x["cnt_thresh"] = meta.cnt_thresh
+            x[MET.cnt_thresh] = meta.cnt_thresh
     return field_fcst, field_obs
 
 
@@ -601,26 +611,26 @@ def _forecast_grid(
 
 
 def _meta(c: Config, varname: str) -> VarMeta:
-    return VARMETA[c.variables[varname]["name"]]
+    return VARMETA[c.variables[varname][S.name]]
 
 
 def _prepare_plot_data(reqs: Sequence[Node], stat: str, width: int | None) -> pd.DataFrame:
     linetype = LINETYPE[stat]
     files = [str(x.ref).replace(".stat", f"_{linetype}.txt") for x in reqs]
-    columns = ["MODEL", "FCST_LEAD", stat]
-    if linetype in ["cts", "nbrcnt"]:
-        columns.append("FCST_THRESH")
-    if linetype == "nbrcnt":
-        columns.append("INTERP_PNTS")
+    columns = [MET.MODEL, MET.FCST_LEAD, stat]
+    if linetype in [MET.cts, MET.nbrcnt]:
+        columns.append(MET.FCST_THRESH)
+    if linetype == MET.nbrcnt:
+        columns.append(MET.INTERP_PNTS)
     plot_rows = [pd.read_csv(file, sep=r"\s+")[columns] for file in files]
     plot_data = pd.concat(plot_rows)
-    plot_data["FCST_LEAD"] = plot_data["FCST_LEAD"] // 10000
-    if "FCST_THRESH" in columns:
-        plot_data["LABEL"] = plot_data.apply(
+    plot_data[MET.FCST_LEAD] = plot_data[MET.FCST_LEAD] // 10000
+    if MET.FCST_THRESH in columns:
+        plot_data[MET.LABEL] = plot_data.apply(
             lambda row: f"{row['MODEL']}, threshold: {row['FCST_THRESH']}", axis=1
         )
-    if "INTERP_PNTS" in columns and width is not None:
-        plot_data = plot_data[plot_data["INTERP_PNTS"] == width**2]
+    if MET.INTERP_PNTS in columns and width is not None:
+        plot_data = plot_data[plot_data[MET.INTERP_PNTS] == width**2]
     return plot_data
 
 
@@ -633,7 +643,7 @@ def _prepbufr(url: str, outdir: Path) -> Node:
 
 def _regrid_width(c: Config) -> int:
     try:
-        return {"BILIN": 2, "NEAREST": 1}[c.regrid.method]
+        return {MET.BILIN: 2, MET.NEAREST: 1}[c.regrid.method]
     except KeyError as e:
         msg = "Could not determine 'width' value for regrid method '%s'" % c.regrid.method
         raise WXVXError(msg) from e
@@ -667,7 +677,7 @@ def _stat_reqs(
     reqs_for = lambda source: [f(*args) for args in _stat_args(c, varname, level, source, cycle)]
     reqs: Sequence[Node] = reqs_for(Source.FORECAST)
     if c.baseline.name is not None:
-        source = Source.TRUTH if c.baseline.name == "truth" else Source.BASELINE
+        source = Source.TRUTH if c.baseline.name == S.truth else Source.BASELINE
         reqs = [*reqs, *reqs_for(source)]
     return reqs
 
@@ -676,7 +686,7 @@ def _stats_widths(c: Config, varname) -> Iterator[tuple[str, int | None]]:
     meta = _meta(c, varname)
     return chain.from_iterable(
         ((stat, width) for width in (meta.nbrhd_width or []))
-        if LINETYPE[stat] == "nbrcnt"
+        if LINETYPE[stat] == MET.nbrcnt
         else [(stat, None)]
         for stat in meta.met_stats
     )
@@ -691,7 +701,7 @@ def _varnames_levels(c: Config) -> Iterator[tuple[str, float | None]]:
     return iter(
         (varname, level)
         for varname, attrs in c.variables.items()
-        for level in attrs.get("levels", [None])
+        for level in attrs.get(S.levels, [None])
     )
 
 
@@ -706,9 +716,9 @@ def _vars_varnames_times(c: Config) -> Iterator[tuple[Var, str, TimeCoords]]:
 @cache
 def _vxvars(c: Config) -> dict[Var, str]:
     return {
-        Var(attrs["name"], attrs["level_type"], level): varname
+        Var(attrs[S.name], attrs[S.level_type], level): varname
         for varname, attrs in c.variables.items()
-        for level in attrs.get("levels", [None])
+        for level in attrs.get(S.levels, [None])
     }
 
 

@@ -20,6 +20,7 @@ import jinja2
 import magic
 import zarr
 
+from wxvx.strings import MET, S
 from wxvx.times import tcinfo
 
 if TYPE_CHECKING:
@@ -32,30 +33,25 @@ _STATE: dict = {}
 
 pkgname = __name__.split(".", maxsplit=1)[0]
 
-DataFormat = Enum(
-    "DataFormat",
-    [
-        ("BUFR", auto()),
-        ("GRIB", auto()),
-        ("NETCDF", auto()),
-        ("ZARR", auto()),
-        ("UNKNOWN", auto()),
-    ],
-)
 
-Proximity = Enum(
-    "Proximity",
-    [
-        ("LOCAL", auto()),
-        ("REMOTE", auto()),
-    ],
-)
+class DataFormat(Enum):
+    BUFR = auto()
+    GRIB = auto()
+    NETCDF = auto()
+    ZARR = auto()
+    UNKNOWN = auto()
+
+
+class Proximity(Enum):
+    LOCAL = auto()
+    REMOTE = auto()
+
 
 LINETYPE = {
-    "FSS": "nbrcnt",
-    "ME": "cnt",
-    "PODY": "cts",
-    "RMSE": "cnt",
+    MET.FSS: MET.nbrcnt,
+    MET.ME: MET.cnt,
+    MET.PODY: MET.cts,
+    MET.RMSE: MET.cnt,
 }
 
 
@@ -129,26 +125,26 @@ def mpexec(cmd: str, rundir: Path, taskname: str, env: dict | None = None) -> No
     rundir.mkdir(parents=True, exist_ok=True)
     kwargs = {"check": False, "cwd": rundir, "shell": True}
     if env:
-        kwargs["env"] = env
+        kwargs[S.env] = env
     with _POOL_LOCK:
-        if "pool" not in _STATE:
+        if S.pool not in _STATE:
             _initpool()
-    _STATE["pool"].apply(run, [cmd], kwargs)
+    _STATE[S.pool].apply(run, [cmd], kwargs)
 
 
 def render(template: str, tc: TimeCoords, context: dict | None = None) -> str:
     yyyymmdd, hh, leadtime = tcinfo(tc)
     timevars = {
-        "yyyymmdd": yyyymmdd,
-        "hh": hh,
-        "fh": int(leadtime),
-        "cycle": tc.cycle,
-        "leadtime": tc.leadtime,
+        S.yyyymmdd: yyyymmdd,
+        S.hh: hh,
+        S.fh: int(leadtime),
+        S.cycle: tc.cycle,
+        S.leadtime: tc.leadtime,
     }
     ctx = context or {}
     ctx.update(timevars)
     env = jinja2.Environment(autoescape=True)
-    env.filters.update({"env": lambda x: os.environ[x]})
+    env.filters.update({S.env: lambda x: os.environ[x]})
     return env.from_string(template).render(**ctx)
 
 
@@ -181,4 +177,4 @@ def version() -> str:
 
 
 def _initpool() -> None:
-    _STATE["pool"] = Pool(initializer=signal, initargs=(SIGINT, SIG_IGN))
+    _STATE[S.pool] = Pool(initializer=signal, initargs=(SIGINT, SIG_IGN))

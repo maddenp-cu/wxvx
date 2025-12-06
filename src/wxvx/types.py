@@ -11,10 +11,11 @@ from typing import Any, Protocol, cast
 
 from uwtools.api.config import YAMLConfig, validate
 
+from wxvx.strings import MET, S
 from wxvx.util import LINETYPE, WXVXError, expand, resource_path, to_datetime, to_timedelta
 
-_TRUTH_NAMES_GRID = ("GFS", "HRRR")
-_TRUTH_NAMES_POINT = ("PREPBUFR",)
+_TRUTH_NAMES_GRID = (S.GFS, S.HRRR)
+_TRUTH_NAMES_POINT = (S.PREPBUFR,)
 _TRUTH_NAMES = tuple(sorted([*_TRUTH_NAMES_GRID, *_TRUTH_NAMES_POINT]))
 
 _DatetimeT = str | datetime
@@ -25,30 +26,20 @@ class Named(Protocol):
     name: str
 
 
-Source = Enum(
-    "Source",
-    [
-        ("BASELINE", auto()),
-        ("FORECAST", auto()),
-        ("TRUTH", auto()),
-    ],
-)
+class Source(Enum):
+    BASELINE = auto()
+    FORECAST = auto()
+    TRUTH = auto()
 
-ToGridVal = Enum(
-    "ToGridVal",
-    [
-        ("FCST", auto()),
-        ("OBS", auto()),
-    ],
-)
 
-TruthType = Enum(
-    "TruthType",
-    [
-        ("GRID", auto()),
-        ("POINT", auto()),
-    ],
-)
+class ToGridVal(Enum):
+    FCST = auto()
+    OBS = auto()
+
+
+class TruthType(Enum):
+    GRID = auto()
+    POINT = auto()
 
 
 def validated_config(yc: YAMLConfig) -> Config:
@@ -69,12 +60,12 @@ class Baseline:
 
     def __post_init__(self):
         # Handle 'name':
-        names = [*_TRUTH_NAMES_GRID, "truth", None]
+        names = [*_TRUTH_NAMES_GRID, S.truth, None]
         if self.name not in names:
             strnames = [str(name) for name in names]
             raise WXVXError("Set baseline.name to one of: %s" % ", ".join(strnames))
         # Handle combination of 'name' and 'url':
-        if self.name == "truth":
+        if self.name == S.truth:
             assert self.url is None
         elif self.name is not None:
             assert self.url is not None
@@ -82,27 +73,27 @@ class Baseline:
 
 class Config:
     def __init__(self, raw: dict):
-        baseline = raw.get("baseline", {"name": None})
-        paths = raw["paths"]
-        grids = paths["grids"]
+        baseline = raw.get(S.baseline, {S.name: None})
+        paths = raw[S.paths]
+        grids = paths[S.grids]
         self.baseline = Baseline(**baseline)
-        self.cycles = Cycles(raw["cycles"])
-        self.forecast = Forecast(**raw["forecast"])
-        self.leadtimes = Leadtimes(raw["leadtimes"])
+        self.cycles = Cycles(raw[S.cycles])
+        self.forecast = Forecast(**raw[S.forecast])
+        self.leadtimes = Leadtimes(raw[S.leadtimes])
         self.paths = Paths(
-            grids.get("baseline"),
-            grids.get("forecast"),
-            grids.get("truth"),
-            paths.get("obs"),
-            paths["run"],
+            grids.get(S.baseline),
+            grids.get(S.forecast),
+            grids.get(S.truth),
+            paths.get(S.obs),
+            paths[S.run],
         )
         self.raw = raw
-        self.regrid = Regrid(**raw.get("regrid", {}))
-        self.truth = Truth(**raw["truth"])
-        self.variables = raw["variables"]
+        self.regrid = Regrid(**raw.get(S.regrid, {}))
+        self.truth = Truth(**raw[S.truth])
+        self.variables = raw[S.variables]
         self._validate()
 
-    KEYS = ("baseline", "cycles", "forecast", "leadtimes", "paths", "truth", "variables")
+    KEYS = (S.baseline, S.cycles, S.forecast, S.leadtimes, S.paths, S.truth, S.variables)
 
     def __eq__(self, other):
         return all(getattr(self, k) == getattr(other, k) for k in self.KEYS)
@@ -123,7 +114,7 @@ class Config:
         if len(set(names)) != len(names):
             msg = "Distinct baseline.name (if set), forecast.name, and truth.name required"
             raise WXVXError(msg)
-        if self.baseline.name == "truth":
+        if self.baseline.name == S.truth:
             if self.truth.type is TruthType.POINT:
                 msg = "Settings baseline.name '%s' and truth.type '%s' are incompatible" % (
                     self.baseline.name,
@@ -131,11 +122,11 @@ class Config:
                 )
                 raise WXVXError(msg)
             if self.paths.grids_baseline is not None:
-                logging.warning("Ignoring paths.grids.baseline when baseline.name is 'truth'")
+                logging.warning("Ignoring paths.grids.baseline when baseline.name is '%s'", S.truth)
         elif self.baseline.name is not None and not self.paths.grids_baseline:
-            msg = "Specify paths.grids.baseline when baseline.name is not 'truth'"
+            msg = f"Specify paths.grids.baseline when baseline.name is not '{S.truth}'"
             raise WXVXError(msg)
-        if self.regrid.to == "OBS":
+        if self.regrid.to == S.OBS:
             msg = "Cannot regrid to observations per regrid.to config value"
             raise WXVXError(msg)
         if self.truth.type == TruthType.GRID and not self.paths.grids_truth:
@@ -153,14 +144,14 @@ class Coords:
     longitude: str
     time: Time
 
-    KEYS = ("latitude", "level", "longitude", "time")
+    KEYS = (S.latitude, S.level, S.longitude, S.time)
 
     def __hash__(self):
         return _hash(self)
 
     def __post_init__(self):
         if isinstance(self.time, dict):
-            _force(self, "time", Time(**self.time))
+            _force(self, S.time, Time(**self.time))
 
 
 class Cycles:
@@ -180,19 +171,19 @@ class Cycles:
     def values(self) -> list[datetime]:
         if isinstance(self.raw, dict):
             dt_start, dt_stop = [
-                to_datetime(cast(_DatetimeT, self.raw[x])) for x in ("start", "stop")
+                to_datetime(cast(_DatetimeT, self.raw[x])) for x in (S.start, S.stop)
             ]
-            td_step = to_timedelta(cast(_TimedeltaT, self.raw["step"]))
+            td_step = to_timedelta(cast(_TimedeltaT, self.raw[S.step]))
             return expand(dt_start, td_step, dt_stop)
         return sorted(map(to_datetime, self.raw))
 
 
 class Forecast:
     KEYS = (
-        "coords",
-        "mask",
-        "name",
-        "path",
+        S.coords,
+        S.mask,
+        S.name,
+        S.path,
         "_projection",  # use '_projection' (not 'projection') to avoid triggering the property.
     )
 
@@ -242,7 +233,7 @@ class Forecast:
     def projection(self) -> dict:
         if self._projection is None:
             logging.info("No forecast projection specified, defaulting to latlon")
-            self._projection = {"proj": "latlon"}
+            self._projection = {S.proj: S.latlon}
         return self._projection
 
 
@@ -263,7 +254,7 @@ class Leadtimes:
     def values(self) -> list[timedelta]:
         if isinstance(self.raw, dict):
             td_start, td_step, td_stop = [
-                to_timedelta(cast(_TimedeltaT, self.raw[x])) for x in ("start", "step", "stop")
+                to_timedelta(cast(_TimedeltaT, self.raw[x])) for x in (S.start, S.step, S.stop)
             ]
             return expand(td_start, td_step, td_stop)
         return sorted(map(to_timedelta, self.raw))
@@ -278,7 +269,7 @@ class Paths:
     run: Path
 
     def __post_init__(self):
-        for key in ["grids_baseline", "grids_forecast", "grids_truth", "obs", "run"]:
+        for key in [S.grids_baseline, S.grids_forecast, S.grids_truth, S.obs, S.run]:
             if val := getattr(self, key):
                 _force(self, key, Path(val))
 
@@ -288,11 +279,11 @@ class Regrid:
     # See https://metplus.readthedocs.io/projects/met/en/main_v11.0/Users_Guide/appendixB.html#grids
     # for information on the "GNNN" grid names accepted as regrid-to values.
 
-    method: str = "NEAREST"
+    method: str = MET.NEAREST
     to: ToGrid | None = None
 
     def __post_init__(self):
-        _force(self, "to", ToGrid("forecast" if self.to is None else str(self.to)))
+        _force(self, S.to, ToGrid(S.forecast if self.to is None else str(self.to)))
         assert self.to is not None
 
 
@@ -309,7 +300,7 @@ class Time:
 class ToGrid:
     def __init__(self, val: str):
         self.val: str | ToGridVal = val
-        mapping = {"forecast": ToGridVal.FCST, "truth": ToGridVal.OBS}
+        mapping = {S.forecast: ToGridVal.FCST, S.truth: ToGridVal.OBS}
         self.val = mapping.get(val, val)
 
     def __eq__(self, other):
@@ -341,7 +332,7 @@ class Truth:
         )
         if isinstance(self.type, str):
             assert self.type in types
-        _force(self, "type", types.get(str(self.type), self.type))
+        _force(self, S.type, types.get(str(self.type), self.type))
         # Handle 'name':
         if self.name not in _TRUTH_NAMES:
             raise WXVXError("Set truth.name to one of: %s" % ", ".join(_TRUTH_NAMES))
@@ -374,20 +365,20 @@ class VarMeta:
     def __post_init__(self):
         assert self.cf_standard_name
         assert self.description
-        assert self.level_type in ("atmosphere", "heightAboveGround", "isobaricInhPa", "surface")
+        assert self.level_type in (S.atmosphere, S.heightAboveGround, S.isobaricInhPa, S.surface)
         assert self.met_stats
         assert self.name
         assert self.units
         assert all(x in LINETYPE for x in self.met_stats)
         for k, v in vars(self).items():
             match k:
-                case "cat_thresh":
+                case MET.cat_thresh:
                     assert v is None or (v and all(isinstance(x, str) for x in v))
-                case "cnt_thresh":
+                case MET.cnt_thresh:
                     assert v is None or (v and all(isinstance(x, str) for x in v))
-                case "nbrhd_shape":
-                    assert v is None or v in ("CIRCLE", "SQUARE")
-                case "nbrhd_width":
+                case MET.nbrhd_shape:
+                    assert v is None or v in (MET.CIRCLE, MET.SQUARE)
+                case MET.nbrhd_width:
                     assert v is None or (v and all(isinstance(x, int) for x in v))
 
 
