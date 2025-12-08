@@ -3,95 +3,96 @@ from collections.abc import Callable
 from pytest import mark, raises
 
 from wxvx import metconf
+from wxvx.strings import MET
 from wxvx.types import ToGridVal
 
-# Public:
+# Public
 
 
 def test_metconf_render(tidy):
     config = {
-        "fcst": {
-            "field": [
+        MET.fcst: {
+            MET.field: [
                 {
-                    "cat_thresh": [
+                    MET.cat_thresh: [
                         ">=20",
                         ">=30",
                     ],
-                    "level": [
+                    MET.level: [
                         "(0,0,*,*)",
                     ],
-                    "name": "T2M",
+                    MET.name: "T2M",
                 }
             ]
         },
-        "interp": {
-            "shape": "SQUARE",
-            "type": {
-                "method": "BILIN",
-                "width": 2,
+        MET.interp: {
+            MET.shape: "SQUARE",
+            MET.type: {
+                MET.method: "BILIN",
+                MET.width: 2,
             },
-            "vld_thresh": 1.0,
+            MET.vld_thresh: 1.0,
         },
-        "mask": {
-            "poly": [
+        MET.mask: {
+            MET.poly: [
                 "a.nc",
             ],
         },
-        "message_type": [
+        MET.message_type: [
             "AIRUPA",
         ],
-        "message_type_group_map": {
+        MET.message_type_group_map: {
             "AIRUPA": "ADPUPA,AIRCAR,AIRCFT",
         },
-        "model": "GraphHRRR",
-        "nbrhd": {
-            "shape": "CIRCLE",
-            "width": [
+        MET.model: "GraphHRRR",
+        MET.nbrhd: {
+            MET.shape: "CIRCLE",
+            MET.width: [
                 3,
                 5,
             ],
         },
-        "nc_pairs_flag": "FALSE",
-        "obs": {
-            "field": [
+        MET.nc_pairs_flag: "FALSE",
+        MET.obs: {
+            MET.field: [
                 {
-                    "cat_thresh": [
+                    MET.cat_thresh: [
                         ">=20",
                         ">=30",
                     ],
-                    "level": [
+                    MET.level: [
                         "Z2",
                     ],
-                    "name": "TMP",
+                    MET.name: "TMP",
                 },
             ]
         },
-        "obs_bufr_var": [
+        MET.obs_bufr_var: [
             "D_RH",
             "QOB",
         ],
-        "obs_window": {
-            "beg": -1800,
-            "end": 1800,
+        MET.obs_window: {
+            MET.beg: -1800,
+            MET.end: 1800,
         },
-        "obtype": "HRRR",
-        "output_flag": {
-            "cnt": "BOTH",
+        MET.obtype: "HRRR",
+        MET.output_flag: {
+            MET.cnt: "BOTH",
         },
-        "output_prefix": "foo_bar",
-        "regrid": {
-            "to_grid": ToGridVal.FCST.name,
+        MET.output_prefix: "foo_bar",
+        MET.regrid: {
+            MET.to_grid: ToGridVal.FCST.name,
         },
-        "time_summary": {
-            "obs_var": [],
-            "step": 3600,
-            "type": [
+        MET.time_summary: {
+            MET.obs_var: [],
+            MET.step: 3600,
+            MET.type: [
                 "min",
                 "max",
             ],
-            "width": 3600,
+            MET.width: 3600,
         },
-        "tmp_dir": "/path/to/dir",
+        MET.tmp_dir: "/path/to/dir",
     }
     text = """
     fcst = {
@@ -188,7 +189,7 @@ def test_metconf_render__fail():
     _fail(metconf.render, config={"foo": "bar"})
 
 
-# Private:
+# Private
 
 
 @mark.parametrize("v", ["foo", 42])
@@ -229,7 +230,7 @@ def test_metconf__field_mapping(tidy):
     expected = tidy(text)
     assert (
         metconf._field_mapping(
-            d={"name": "foo", "cnt_thresh": [1, 2], "level": ["(0,0,*,*)"]}, level=0
+            d={MET.name: "foo", MET.cnt_thresh: [1, 2], MET.level: ["(0,0,*,*)"]}, level=0
         )
         == expected
     )
@@ -265,9 +266,9 @@ def test_metconf__field_sequence(tidy):
     ];
     """
     expected = tidy(text).split("\n")
-    d1 = {"name": "foo", "cnt_thresh": [1, 2], "level": ["(0,0,*,*)"]}
-    d2 = {"name": "bar", "cat_thresh": [3, 4], "level": ["P1000"]}
-    assert metconf._field_sequence(k="field", v=[d1, d2], level=0) == expected
+    d1 = {MET.name: "foo", MET.cnt_thresh: [1, 2], MET.level: ["(0,0,*,*)"]}
+    d2 = {MET.name: "bar", MET.cat_thresh: [3, 4], MET.level: ["P1000"]}
+    assert metconf._field_sequence(k=MET.field, v=[d1, d2], level=0) == expected
 
 
 def test_metconf__indent():
@@ -278,7 +279,7 @@ def test_metconf__interp__fail():
     _fail(metconf._interp)
 
 
-@mark.parametrize(("k", "v"), [("shape", "SQUARE"), ("vld_thresh", 1.0)])
+@mark.parametrize(("k", "v"), [(MET.shape, MET.SQUARE), (MET.vld_thresh, 1.0)])
 def test_metconf__interp__kvpair(k, v):
     assert metconf._interp(k=k, v=v, level=1) == [f"  {k} = {v};"]
 
@@ -291,7 +292,7 @@ def test_metconf__interp__type(tidy):
     }
     """
     expected = tidy(text).split("\n")
-    assert metconf._interp(k="type", v={"method": "BILIN", "width": 2}, level=0) == expected
+    assert metconf._interp(k=MET.type, v={MET.method: MET.BILIN, MET.width: 2}, level=0) == expected
 
 
 def test_metconf__key_val_map_list(tidy):
@@ -332,11 +333,11 @@ def test_metconf__mask__grid_list(tidy):
     ];
     """
     expected = tidy(text).split("\n")
-    assert metconf._mask(k="grid", v=["G104"], level=0) == expected
+    assert metconf._mask(k=MET.grid, v=["G104"], level=0) == expected
 
 
 def test_metconf__mask__grid_str():
-    assert metconf._mask(k="grid", v="G104", level=1) == ['  grid = "G104";']
+    assert metconf._mask(k=MET.grid, v="G104", level=1) == ['  grid = "G104";']
 
 
 def test_metconf__nbrhd():
@@ -344,7 +345,7 @@ def test_metconf__nbrhd():
         metconf._nbrhd(k="foo", v=None, level=0)
 
 
-@mark.parametrize(("k", "v"), [("beg", -1800), ("end", 1800)])
+@mark.parametrize(("k", "v"), [(MET.beg, -1800), (MET.end, 1800)])
 def test_metconf__obs_window(k, v):
     assert metconf._obs_window(k=k, v=v, level=1) == [f"  {k} = {v};"]
 
@@ -388,12 +389,12 @@ def test_metconf__time_summary__fail():
     _fail(metconf._time_summary)
 
 
-@mark.parametrize(("k", "v"), [("step", 3600), ("width", 2)])
+@mark.parametrize(("k", "v"), [(MET.step, 3600), (MET.width, 2)])
 def test_metconf__time_summary__scalar(k, v):
     assert metconf._time_summary(k=k, v=v, level=1) == [f"  {k} = {v};"]
 
 
-@mark.parametrize(("k", "v"), [("obs_var", ["foo", "bar"]), ("type", ["min", "max"])])
+@mark.parametrize(("k", "v"), [(MET.obs_var, ["foo", "bar"]), (MET.type, ["min", "max"])])
 def test_metconf__time_summary__sequence(k, tidy, v):
     text = f'''
     {k} = [
@@ -410,7 +411,7 @@ def test_metconf__top():
         metconf._top(k="foo", v=None, level=0)
 
 
-@mark.parametrize(("k", "v"), [("method", "BILIN"), ("width", 2)])
+@mark.parametrize(("k", "v"), [(MET.method, MET.BILIN), (MET.width, 2)])
 def test_metconf__type(k, v):
     assert metconf._type(k=k, v=v, level=1) == [f"  {k} = {v};"]
 

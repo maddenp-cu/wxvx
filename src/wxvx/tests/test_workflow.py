@@ -19,6 +19,7 @@ from iotaa import Asset, Node, external
 from pytest import fixture, mark, raises
 
 from wxvx import variables, workflow
+from wxvx.strings import EC, MET, NOAA, S
 from wxvx.tests.support import with_del
 from wxvx.times import TimeCoords, gen_validtimes, tcinfo
 from wxvx.types import Config, Source, TruthType
@@ -27,53 +28,53 @@ from wxvx.variables import Var
 
 TESTDATA = {
     "foo": (
-        "T2M",
+        NOAA.T2M,
         2,
         [
-            pd.DataFrame({"MODEL": "foo", "FCST_LEAD": [60000], "RMSE": [0.5]}),
-            pd.DataFrame({"MODEL": "bar", "FCST_LEAD": [60000], "RMSE": [0.4]}),
+            pd.DataFrame({MET.MODEL: "foo", MET.FCST_LEAD: [60000], MET.RMSE: [0.5]}),
+            pd.DataFrame({MET.MODEL: "bar", MET.FCST_LEAD: [60000], MET.RMSE: [0.4]}),
         ],
-        "RMSE",
+        MET.RMSE,
         None,
     ),
     "bar": (
-        "REFC",
+        NOAA.REFC,
         None,
         [
             pd.DataFrame(
-                {"MODEL": "foo", "FCST_LEAD": [60000], "PODY": [0.5], "FCST_THRESH": ">=20"}
+                {MET.MODEL: "foo", MET.FCST_LEAD: [60000], MET.PODY: [0.5], MET.FCST_THRESH: ">=20"}
             ),
             pd.DataFrame(
-                {"MODEL": "bar", "FCST_LEAD": [60000], "PODY": [0.4], "FCST_THRESH": ">=30"}
+                {MET.MODEL: "bar", MET.FCST_LEAD: [60000], MET.PODY: [0.4], MET.FCST_THRESH: ">=30"}
             ),
         ],
-        "PODY",
+        MET.PODY,
         None,
     ),
     "baz": (
-        "REFC",
+        NOAA.REFC,
         None,
         [
             pd.DataFrame(
                 {
-                    "MODEL": "foo",
-                    "FCST_LEAD": [60000],
-                    "FSS": [0.5],
-                    "FCST_THRESH": ">=20",
-                    "INTERP_PNTS": 9,
+                    MET.MODEL: "foo",
+                    MET.FCST_LEAD: [60000],
+                    MET.FSS: [0.5],
+                    MET.FCST_THRESH: ">=20",
+                    MET.INTERP_PNTS: 9,
                 }
             ),
             pd.DataFrame(
                 {
-                    "MODEL": "bar",
-                    "FCST_LEAD": [60000],
-                    "FSS": [0.4],
-                    "FCST_THRESH": ">=30",
-                    "INTERP_PNTS": 9,
+                    MET.MODEL: "bar",
+                    MET.FCST_LEAD: [60000],
+                    MET.FSS: [0.4],
+                    MET.FCST_THRESH: ">=30",
+                    MET.INTERP_PNTS: 9,
                 }
             ),
         ],
-        "FSS",
+        MET.FSS,
         3,
     ),
 }
@@ -81,12 +82,12 @@ TESTDATA = {
 # Task Tests
 
 
-@mark.parametrize("baseline_name", ["HRRR", "truth", None])
+@mark.parametrize("baseline_name", [S.HRRR, S.truth, None])
 @mark.parametrize("truth_type", [TruthType.GRID, TruthType.POINT])
 def test_workflow_grids(baseline_name, c, noop, truth_type):
-    url = None if baseline_name == "truth" else c.baseline.url
+    url = None if baseline_name == S.truth else c.baseline.url
     c.baseline = replace(c.baseline, name=baseline_name, url=url)
-    truth_name = "GFS" if truth_type is TruthType.GRID else "PREPBUFR"
+    truth_name = "GFS" if truth_type is TruthType.GRID else S.PREPBUFR
     c.truth = replace(c.truth, name=truth_name, type=truth_type)
     expected = 1
     if baseline_name is not None:
@@ -94,16 +95,16 @@ def test_workflow_grids(baseline_name, c, noop, truth_type):
     if truth_type is TruthType.GRID:
         expected += 1
     with (
-        patch.object(workflow, "grids_baseline", noop),
-        patch.object(workflow, "grids_forecast", noop),
-        patch.object(workflow, "grids_truth", noop),
+        patch.object(workflow, S.grids_baseline, noop),
+        patch.object(workflow, S.grids_forecast, noop),
+        patch.object(workflow, S.grids_truth, noop),
     ):
         assert len(workflow.grids(c=c).ref) == expected
 
 
-@mark.parametrize("baseline_name", ["HRRR", "truth", None])
+@mark.parametrize("baseline_name", [S.HRRR, S.truth, None])
 def test_workflow_grids_baseline(baseline_name, c, ngrids, noop):
-    url = None if baseline_name == "truth" else c.baseline.url
+    url = None if baseline_name == S.truth else c.baseline.url
     c.baseline = replace(c.baseline, name=baseline_name, url=url)
     with patch.object(workflow, "_grid_grib", noop):
         node = workflow.grids_baseline(c=c)
@@ -113,7 +114,7 @@ def test_workflow_grids_baseline(baseline_name, c, ngrids, noop):
     else:
         assert len(cast(list[Node], node.req)) == ngrids
         assert node.taskname == "Baseline grids for %s" % (
-            c.truth.name if baseline_name == "truth" else baseline_name
+            c.truth.name if baseline_name == S.truth else baseline_name
         )
 
 
@@ -124,7 +125,7 @@ def test_workflow_grids_forecast(c, ngrids, noop):
 
 @mark.parametrize("truth_type", [TruthType.GRID, TruthType.POINT])
 def test_workflow_grids_truth(c, ngrids, noop, truth_type):
-    truth_name = "GFS" if truth_type is TruthType.GRID else "PREPBUFR"
+    truth_name = "GFS" if truth_type is TruthType.GRID else S.PREPBUFR
     c.truth = replace(c.truth, name=truth_name, type=truth_type)
     expected = ngrids if truth_type is TruthType.GRID else 0
     with patch.object(workflow, "_grid_grib", noop):
@@ -163,8 +164,8 @@ def test_workflow__config_grid_stat(c, source, fakefs, testvars):
         c=c,
         path=path,
         source=source,
-        varname="REFC",
-        var=testvars["refc"],
+        varname=NOAA.REFC,
+        var=testvars[EC.refc],
         prefix="foo",
         datafmt=DataFormat.GRIB,
         polyfile=None,
@@ -218,7 +219,7 @@ def test_workflow__config_pb2nc(c, fakefs, tidy):
     assert tidy(expected) == path.read_text().strip()
 
 
-@mark.parametrize("to", ["G104", None])
+@mark.parametrize(S.to, ["G104", None])
 def test_workflow__config_pb2nc__alt_masks(c, fakefs, tidy, to):
     path = fakefs / "pb2nc.config"
     assert not path.is_file()
@@ -240,8 +241,8 @@ def test_workflow__config_point_stat__atm(c, fakefs, fmt, testvars, tidy):
         c=c,
         path=path,
         source=Source.FORECAST,
-        varname="HGT",
-        var=testvars["gh"],
+        varname=NOAA.HGT,
+        var=testvars[EC.gh],
         prefix="atm",
         datafmt=fmt,
     )
@@ -313,8 +314,8 @@ def test_workflow__config_point_stat__sfc(c, fakefs, fmt, testvars, tidy):
         c=c,
         path=path,
         source=Source.FORECAST,
-        varname="T2M",
-        var=testvars["2t"],
+        varname=NOAA.T2M,
+        var=testvars[EC.t2],
         prefix="sfc",
         datafmt=fmt,
     )
@@ -386,7 +387,7 @@ def test_workflow__config_point_stat__unsupported_regrid_method(c, fakefs, testv
         path=path,
         source=Source.FORECAST,
         varname="geopotential",
-        var=testvars["gh"],
+        var=testvars[EC.gh],
         prefix="atm",
         datafmt=DataFormat.NETCDF,
     )
@@ -395,14 +396,14 @@ def test_workflow__config_point_stat__unsupported_regrid_method(c, fakefs, testv
 
 
 def test_workflow__existing(fakefs):
-    path = fakefs / "forecast"
+    path = fakefs / S.forecast
     assert not workflow._existing(path=path).ready
     path.touch()
     assert workflow._existing(path=path).ready
 
 
 def test_workflow__forecast_dataset(da_with_leadtime, fakefs):
-    path = fakefs / "forecast"
+    path = fakefs / S.forecast
     assert not workflow._forecast_dataset(path=path).ready
     path.touch()
     with patch.object(workflow.xr, "open_dataset", return_value=da_with_leadtime.to_dataset()):
@@ -431,7 +432,7 @@ def test_workflow__grib_index_data_wgrib2(c, tc, tidy):
         )
     assert node.ref == {
         "gh-isobaricInhPa-0900": variables.HRRR(
-            name="HGT", levstr="900 mb", firstbyte=0, lastbyte=0
+            name=NOAA.HGT, levstr="900 mb", firstbyte=0, lastbyte=0
         )
     }
 
@@ -463,7 +464,7 @@ def test__workflow__grib_message_in_file(c, expected, fakefs, logged, msgs, node
     ):
         ec.codes_new_from_index.side_effect = [object()] * msgs + [None]
         node = workflow._grib_message_in_file(
-            c=c, path=grib_path, tc=tc, var=testvars["gh"], source=Source.TRUTH
+            c=c, path=grib_path, tc=tc, var=testvars[EC.gh], source=Source.TRUTH
         )
         assert node.ready is expected
         if msgs == 2:
@@ -472,22 +473,22 @@ def test__workflow__grib_message_in_file(c, expected, fakefs, logged, msgs, node
 
 @mark.parametrize("template", ["{root}/foo", "file://{root}/foo"])
 def test_workflow__grid_grib__local(config_data, fakefs, gen_config, node, tc, template, testvars):
-    config_data["truth"]["url"] = template.format(root=fakefs)
+    config_data[S.truth][S.url] = template.format(root=fakefs)
     c = gen_config(config_data, fakefs)
     with patch.object(
         workflow, "_grib_message_in_file", return_value=node
     ) as _grib_message_in_file:
-        assert workflow._grid_grib(c=c, tc=tc, var=testvars["t"], source=Source.TRUTH).ready
+        assert workflow._grid_grib(c=c, tc=tc, var=testvars[EC.t], source=Source.TRUTH).ready
         _grib_message_in_file.assert_called_once()
 
 
 def test_workflow__grid_grib__remote(c, tc, testvars):
     idxdata = {
         "gh-isobaricInhPa-0900": variables.HRRR(
-            name="HGT", levstr="900 mb", firstbyte=0, lastbyte=0
+            name=NOAA.HGT, levstr="900 mb", firstbyte=0, lastbyte=0
         ),
         "t-isobaricInhPa-0900": variables.HRRR(
-            name="TMP", levstr="900 mb", firstbyte=2, lastbyte=2
+            name=NOAA.TMP, levstr="900 mb", firstbyte=2, lastbyte=2
         ),
     }
     ready = Event()
@@ -498,14 +499,14 @@ def test_workflow__grid_grib__remote(c, tc, testvars):
         yield Asset(idxdata, ready.is_set)
 
     with patch.object(workflow, "_grib_index_data_wgrib2", wraps=mock) as _grib_index_data_wgrib2:
-        node = workflow._grid_grib(c=c, tc=tc, var=testvars["t"], source=Source.TRUTH)
+        node = workflow._grid_grib(c=c, tc=tc, var=testvars[EC.t], source=Source.TRUTH)
         path = node.ref
         assert not path.exists()
         ready.set()
         with patch.object(workflow, "fetch") as fetch:
             fetch.side_effect = lambda taskname, url, path, headers: path.touch()  # noqa: ARG005
             path.parent.mkdir(parents=True, exist_ok=True)
-            workflow._grid_grib(c=c, tc=tc, var=testvars["t"], source=Source.TRUTH)
+            workflow._grid_grib(c=c, tc=tc, var=testvars[EC.t], source=Source.TRUTH)
         assert path.exists()
     yyyymmdd = tc.yyyymmdd
     hh = tc.hh
@@ -520,15 +521,17 @@ def test_workflow__grid_nc(c_real_fs, check_cf_metadata, da_with_leadtime, tc, t
     path = Path(c_real_fs.paths.grids_forecast, "a.nc")
     da_with_leadtime.to_netcdf(path)
     c_real_fs.forecast._path = str(path)
-    node = workflow._grid_nc(c=c_real_fs, varname="HGT", tc=tc, var=testvars["gh"])
+    node = workflow._grid_nc(c=c_real_fs, varname=NOAA.HGT, tc=tc, var=testvars[EC.gh])
     assert node.ready
-    check_cf_metadata(ds=xr.open_dataset(node.ref, decode_timedelta=True), name="HGT", level=level)
+    check_cf_metadata(
+        ds=xr.open_dataset(node.ref, decode_timedelta=True), name=NOAA.HGT, level=level
+    )
 
 
 def test_workflow__grid_nc__no_paths_grids_forecast(config_data, tc, testvars):
-    c = Config(raw=with_del(config_data, "paths", "grids", "forecast"))
+    c = Config(raw=with_del(config_data, S.paths, S.grids, S.forecast))
     with raises(WXVXError) as e:
-        workflow._grid_nc(c=c, varname="HGT", tc=tc, var=testvars["gh"])
+        workflow._grid_nc(c=c, varname=NOAA.HGT, tc=tc, var=testvars[EC.gh])
     assert str(e.value) == "Specify path.grids.forecast when forecast dataset is netCDF or Zarr"
 
 
@@ -556,7 +559,7 @@ def test_workflow__missing(fakefs):
 def test_workflow__netcdf_from_obs(c, tc):
     yyyymmdd, hh, _ = tcinfo(tc)
     url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
-    c.truth = replace(c.truth, name="PREPBUFR", type="point", url=url)
+    c.truth = replace(c.truth, name=S.PREPBUFR, type=S.point, url=url)
     path = c.paths.obs / yyyymmdd / hh / f"gdas.{yyyymmdd}.t{hh}z.prepbufr.nc"
     assert not path.is_file()
     prepbufr = path.with_suffix(".nr")
@@ -639,12 +642,12 @@ def test_workflow__stats_vs_grid(c, datafmt, fakefs, mask, source, tc, testvars)
         yield Asset(Path("/some/file"), lambda: True)
 
     taskfunc = workflow._stats_vs_grid
-    rundir = fakefs / "run" / "stats" / "19700101" / "00" / "000"
+    rundir = fakefs / S.run / S.stats / "19700101" / "00" / "000"
     taskname = (
         "Stats vs grid for %s 2t-heightAboveGround-0002 at 19700101 00Z 000"
         % str(source).split(".")[1].lower()
     )
-    kwargs = dict(c=c, varname="T2M", tc=tc, var=testvars["2t"], prefix="foo", source=source)
+    kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=testvars[EC.t2], prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
         stat = taskfunc(**kwargs, dry_run=True).ref
         cfgfile = stat.with_suffix(".config")
@@ -675,11 +678,11 @@ def test_workflow__stats_vs_obs(c, datafmt, fakefs, source, tc, testvars):
         yield Asset(Path("/some/file"), lambda: True)
 
     url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
-    c.truth = replace(c.truth, name="PREPBUFR", type="point", url=url)
-    rundir = fakefs / "run" / "stats" / "19700101" / "00" / "000"
-    var = testvars["2t"]
+    c.truth = replace(c.truth, name=S.PREPBUFR, type=S.point, url=url)
+    rundir = fakefs / S.run / S.stats / "19700101" / "00" / "000"
+    var = testvars[EC.t2]
     taskname = "Stats vs obs for %s %s at 19700101 00Z 000" % (source.name.lower(), var)
-    kwargs = dict(c=c, varname="T2M", tc=tc, var=var, prefix="foo", source=source)
+    kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=var, prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
         stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref
         cfgfile = stat.with_suffix(".config")
@@ -710,7 +713,7 @@ def test_workflow__at_validtime(tc):
 
 
 def test_workflow__enforce_point_truth_type(c):
-    c.truth = replace(c.truth, type="grid")
+    c.truth = replace(c.truth, type=S.grid)
     with raises(WXVXError) as e:
         workflow._enforce_point_truth_type(c=c, taskname="foo")
     expected = "foo: This task requires that config value truth.type be set to 'point'"
@@ -727,7 +730,7 @@ def test_workflow__enforce_point_truth_type(c):
 def test_workflow__forecast_grid(c, fmt, path, tc, testvars):
     with patch.object(workflow, "classify_data_format", return_value=fmt):
         req, datafmt = workflow._forecast_grid(
-            path=path, c=c, varname="foo", tc=tc, var=testvars["2t"]
+            path=path, c=c, varname="foo", tc=tc, var=testvars[EC.t2]
         )
     # For netCDF and Zarr forecast datasets, the grid will be extracted from the dataset and CF-
     # decorated, so the requirement is a _grid_nc task, whose taskname is "Forecast grid ..."
@@ -739,7 +742,7 @@ def test_workflow__forecast_grid__grib(c, tc, testvars):
     path = Path("/path/to/a.grib2")
     with patch.object(workflow, "classify_data_format", return_value=DataFormat.GRIB):
         req, datafmt = workflow._forecast_grid(
-            path=path, c=c, varname="foo", tc=tc, var=testvars["2t"]
+            path=path, c=c, varname="foo", tc=tc, var=testvars[EC.t2]
         )
     # For GRIB forecast datasets, the entire GRIB file will be accessed by MET, so the requirement
     # is an existing local path.
@@ -751,7 +754,7 @@ def test_workflow__forecast_grid__missing(c, tc, testvars):
     path = Path("/path/to/a.grib2")
     with patch.object(workflow, "classify_data_format", return_value=DataFormat.UNKNOWN):
         req, datafmt = workflow._forecast_grid(
-            path=path, c=c, varname="foo", tc=tc, var=testvars["2t"]
+            path=path, c=c, varname="foo", tc=tc, var=testvars[EC.t2]
         )
     # For missing forecast datasets, the requirement is a missing-file external task that blocks
     # further execution.
@@ -760,9 +763,9 @@ def test_workflow__forecast_grid__missing(c, tc, testvars):
 
 
 def test_workflow__meta(c):
-    meta = workflow._meta(c=c, varname="HGT")
+    meta = workflow._meta(c=c, varname=NOAA.HGT)
     assert meta.cf_standard_name == "geopotential_height"
-    assert meta.level_type == "isobaricInhPa"
+    assert meta.level_type == S.isobaricInhPa
 
 
 @mark.parametrize("dictkey", ["foo", "bar", "baz"])
@@ -774,15 +777,15 @@ def test_workflow__prepare_plot_data(dictkey):
         tdf = workflow._prepare_plot_data(reqs=reqs, stat=stat, width=width)
     assert isinstance(tdf, pd.DataFrame)
     assert stat in tdf.columns
-    assert "FCST_LEAD" in tdf.columns
-    assert all(tdf["FCST_LEAD"] == 6)
-    if stat == "PODY":
-        assert "FCST_THRESH" in tdf.columns
-        assert "LABEL" in tdf.columns
-    if stat == "FSS":
+    assert MET.FCST_LEAD in tdf.columns
+    assert all(tdf[MET.FCST_LEAD] == 6)
+    if stat == MET.PODY:
+        assert MET.FCST_THRESH in tdf.columns
+        assert MET.LABEL in tdf.columns
+    if stat == MET.FSS:
         assert width is not None
-        assert "INTERP_PNTS" in tdf.columns
-        assert tdf["INTERP_PNTS"].eq(width**2).all()
+        assert MET.INTERP_PNTS in tdf.columns
+        assert tdf[MET.INTERP_PNTS].eq(width**2).all()
 
 
 def test_workflow__prepbufr(fakefs):
@@ -794,9 +797,9 @@ def test_workflow__prepbufr(fakefs):
 
 
 def test_workflow__regrid_width(c):
-    c.regrid = replace(c.regrid, method="BILIN")
+    c.regrid = replace(c.regrid, method=MET.BILIN)
     assert workflow._regrid_width(c=c) == 2
-    c.regrid = replace(c.regrid, method="NEAREST")
+    c.regrid = replace(c.regrid, method=MET.NEAREST)
     assert workflow._regrid_width(c=c) == 1
     c.regrid = replace(c.regrid, method="FOO")
     with raises(WXVXError) as e:
@@ -804,7 +807,7 @@ def test_workflow__regrid_width(c):
     assert str(e.value) == "Could not determine 'width' value for regrid method 'FOO'"
 
 
-@mark.parametrize("cycle", [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
+@mark.parametrize(S.cycle, [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
 def test_workflow__stat_args(c, statkit, cycle):
     with (
         patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
@@ -822,13 +825,13 @@ def test_workflow__stat_args(c, statkit, cycle):
     ]
 
 
-@mark.parametrize("baseline_name", ["HRRR", "truth", None])
-@mark.parametrize("cycle", [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
+@mark.parametrize("baseline_name", [S.HRRR, S.truth, None])
+@mark.parametrize(S.cycle, [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
 def test_workflow__stat_reqs(baseline_name, c, statkit, cycle):
     c.baseline = replace(
         c.baseline,
         name=baseline_name,
-        url=None if baseline_name == "truth" else c.baseline.url,
+        url=None if baseline_name == S.truth else c.baseline.url,
     )
     with (
         patch.object(workflow, "_stats_vs_grid") as _stats_vs_grid,
@@ -848,29 +851,29 @@ def test_workflow__stat_reqs(baseline_name, c, statkit, cycle):
 
 
 def test_workflow__stats_widths(c):
-    assert list(workflow._stats_widths(c=c, varname="REFC")) == [
-        ("FSS", 3),
-        ("FSS", 5),
-        ("FSS", 11),
-        ("PODY", None),
+    assert list(workflow._stats_widths(c=c, varname=NOAA.REFC)) == [
+        (MET.FSS, 3),
+        (MET.FSS, 5),
+        (MET.FSS, 11),
+        (MET.PODY, None),
     ]
-    assert list(workflow._stats_widths(c=c, varname="SPFH")) == [
-        ("ME", None),
-        ("RMSE", None),
+    assert list(workflow._stats_widths(c=c, varname=NOAA.SPFH)) == [
+        (MET.ME, None),
+        (MET.RMSE, None),
     ]
 
 
 def test_workflow__var(c, testvars):
-    assert workflow._var(c=c, varname="HGT", level=900) == testvars["gh"]
+    assert workflow._var(c=c, varname=NOAA.HGT, level=900) == testvars[EC.gh]
 
 
 def test_workflow__varnames_levels(c):
     assert list(workflow._varnames_levels(c=c)) == [
-        ("HGT", 900),
-        ("REFC", None),
-        ("SPFH", 900),
-        ("SPFH", 1000),
-        ("T2M", 2),
+        (NOAA.HGT, 900),
+        (NOAA.REFC, None),
+        (NOAA.SPFH, 900),
+        (NOAA.SPFH, 1000),
+        (NOAA.T2M, 2),
     ]
 
 
@@ -883,11 +886,11 @@ def test_workflow__vars_varnames_times(c, ngrids):
 
 def test_workflow__vxvars(c, testvars):
     assert workflow._vxvars(c=c) == {
-        testvars["2t"]: "T2M",
-        testvars["gh"]: "HGT",
-        Var("q", "isobaricInhPa", 1000): "SPFH",
-        Var("q", "isobaricInhPa", 900): "SPFH",
-        testvars["refc"]: "REFC",
+        testvars[EC.t2]: NOAA.T2M,
+        testvars[EC.gh]: NOAA.HGT,
+        Var(EC.q, S.isobaricInhPa, 1000): NOAA.SPFH,
+        Var(EC.q, S.isobaricInhPa, 900): NOAA.SPFH,
+        testvars[EC.refc]: NOAA.REFC,
     }
 
 
@@ -926,7 +929,7 @@ def noop():
 @fixture
 def obs_info(c):
     url = "https://bucket.amazonaws.com/gdas.{{ yyyymmdd }}.t{{ hh }}z.prepbufr.nr"
-    c.truth = replace(c.truth, name="PREPBUFR", type="point", url=url)
+    c.truth = replace(c.truth, name=S.PREPBUFR, type=S.point, url=url)
     expected = [
         c.paths.obs / yyyymmdd / hh / f"gdas.{yyyymmdd}.t{hh}z.prepbufr.x"
         for (yyyymmdd, hh) in [
@@ -943,25 +946,25 @@ def obs_info(c):
 @fixture
 def statkit(tc, testvars):
     level = 900
-    level_type = "isobaricInhPa"
+    level_type = S.isobaricInhPa
     return ns(
         level=level,
         level_type=level_type,
         prefix=f"forecast_gh_{level_type}_{level:04d}",
         source=Source.FORECAST,
         tc=tc,
-        var=testvars["gh"],
-        varname="HGT",
+        var=testvars[EC.gh],
+        varname=NOAA.HGT,
     )
 
 
 @fixture
 def testvars():
     return {
-        "2t": Var("2t", "heightAboveGround", 2),
-        "gh": Var(name="gh", level_type="isobaricInhPa", level=900),
-        "refc": Var(name="refc", level_type="atmosphere"),
-        "t": Var(name="t", level_type="isobaricInhPa", level=900),
+        EC.t2: Var(EC.t2, S.heightAboveGround, 2),
+        EC.gh: Var(name=EC.gh, level_type=S.isobaricInhPa, level=900),
+        EC.refc: Var(name=EC.refc, level_type=S.atmosphere),
+        EC.t: Var(name=EC.t, level_type=S.isobaricInhPa, level=900),
     }
 
 

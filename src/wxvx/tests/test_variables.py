@@ -7,6 +7,7 @@ import xarray as xr
 from pytest import fixture, mark, raises
 
 from wxvx import variables
+from wxvx.strings import EC, NOAA, S
 from wxvx.util import WXVXError, render
 
 # Fixtures
@@ -24,13 +25,13 @@ def da_flat(da_with_leadtime):
 # Tests
 
 
-@mark.parametrize("level_type", ["atmosphere", "surface"])
+@mark.parametrize(S.level_type, [S.atmosphere, S.surface])
 def test_variables_Var_no_level(level_type):
     var = variables.Var(name="foo", level_type=level_type)
     assert var.name == "foo"
     assert var.level_type == level_type
     assert var.level is None
-    assert var._keys == {"name", "level_type"}
+    assert var._keys == {S.name, S.level_type}
     assert var == variables.Var("foo", level_type)
     assert var != variables.Var("bar", level_type)
     assert hash(var) == hash(("foo", level_type, None))
@@ -40,13 +41,13 @@ def test_variables_Var_no_level(level_type):
     assert str(var) == "foo-%s" % level_type
 
 
-@mark.parametrize(("level_type", "level"), [("heightAboveGround", 2), ("isobaricInhPa", 1000)])
+@mark.parametrize((S.level_type, S.level), [(S.heightAboveGround, 2), (S.isobaricInhPa, 1000)])
 def test_variables_Var_with_level(level, level_type):
     var = variables.Var(name="foo", level_type=level_type, level=level)
     assert var.name == "foo"
     assert var.level_type == level_type
     assert var.level == level
-    assert var._keys == {"name", "level_type", "level"}
+    assert var._keys == {S.name, S.level_type, S.level}
     assert var == variables.Var("foo", level_type, level)
     assert var != variables.Var("bar", level_type, level)
     assert hash(var) == hash(("foo", level_type, level))
@@ -57,26 +58,28 @@ def test_variables_Var_with_level(level, level_type):
 
 
 def test_variables_HRRR():
-    keys = {"name", "level_type", "firstbyte", "lastbyte"}
-    var = variables.HRRR(name="TMP", levstr="900 mb", firstbyte=1, lastbyte=2)
-    assert var.level_type == "isobaricInhPa"
+    keys = {S.name, S.level_type, S.firstbyte, S.lastbyte}
+    var = variables.HRRR(name=NOAA.TMP, levstr="900 mb", firstbyte=1, lastbyte=2)
+    assert var.level_type == S.isobaricInhPa
     assert var.level == 900
     assert var.firstbyte == 1
     assert var.lastbyte == 2
-    assert var._keys == {*keys, "level"}
-    assert variables.HRRR(name="TMP", levstr="surface", firstbyte=1, lastbyte=2)._keys == keys
+    assert var._keys == {*keys, S.level}
+    assert variables.HRRR(name=NOAA.TMP, levstr=S.surface, firstbyte=1, lastbyte=2)._keys == keys
 
 
-@mark.parametrize(("name", "expected"), [("t", "TMP"), ("2t", "TMP"), ("foo", variables.UNKNOWN)])
+@mark.parametrize(
+    (S.name, "expected"), [(EC.t, NOAA.TMP), (EC.t2, NOAA.TMP), ("foo", variables.UNKNOWN)]
+)
 def test_variables_HRRR_varname(name, expected):
     assert variables.HRRR.varname(name=name) == expected
 
 
 @mark.parametrize(
-    ("name", "level_type", "expected"),
+    (S.name, S.level_type, "expected"),
     [
-        ("TMP", "isobaricInhPa", "t"),
-        ("TMP", "heightAboveGround", "2t"),
+        (NOAA.TMP, S.isobaricInhPa, EC.t),
+        (NOAA.TMP, S.heightAboveGround, EC.t2),
         ("FOO", "suface", variables.UNKNOWN),
     ],
 )
@@ -87,10 +90,10 @@ def test_variables_HRRR__canonicalize(name, level_type, expected):
 @mark.parametrize(
     ("expected", "levstr"),
     [
-        (("atmosphere", None), "entire atmosphere"),
-        (("heightAboveGround", 2), "2 m above ground"),
-        (("isobaricInhPa", 900), "900 mb"),
-        (("surface", None), "surface"),
+        ((S.atmosphere, None), "entire atmosphere"),
+        ((S.heightAboveGround, 2), "2 m above ground"),
+        ((S.isobaricInhPa, 900), "900 mb"),
+        ((S.surface, None), "surface"),
         ((variables.UNKNOWN, None), "something else"),
     ],
 )
@@ -98,17 +101,17 @@ def test_variables_HRRR__levinfo(expected, levstr):
     assert variables.HRRR._levinfo(levstr) == expected
 
 
-@mark.parametrize(("leadtime", "validtime"), [("lead_time", None), (None, "validtime")])
+@mark.parametrize((S.leadtime, S.validtime), [("lead_time", None), (None, "validtime")])
 def test_variables_da_construct(
     config_data, da_with_leadtime, da_with_validtime, fakefs, gen_config, leadtime, tc, validtime
 ):
     da = da_with_leadtime if leadtime else da_with_validtime
-    time = config_data["forecast"]["coords"]["time"]
-    time["leadtime"] = leadtime
-    time["validtime"] = validtime
+    time = config_data[S.forecast][S.coords][S.time]
+    time[S.leadtime] = leadtime
+    time[S.validtime] = validtime
     c = gen_config(config_data, fakefs)
-    var = variables.Var(name="gh", level_type="isobaricInhPa", level=900)
-    selected = variables.da_select(c=c, ds=da.to_dataset(), varname="HGT", tc=tc, var=var)
+    var = variables.Var(name=EC.gh, level_type=S.isobaricInhPa, level=900)
+    selected = variables.da_select(c=c, ds=da.to_dataset(), varname=NOAA.HGT, tc=tc, var=var)
     new = variables.da_construct(c=c, da=selected)
     assert new.name == da.name
     assert all(new.latitude == da.latitude)
@@ -118,8 +121,8 @@ def test_variables_da_construct(
 
 
 def test_variables_da_select(c, da_with_leadtime, tc):
-    var = variables.Var(name="gh", level_type="isobaricInhPa", level=900)
-    kwargs = dict(c=c, ds=da_with_leadtime.to_dataset(), varname="HGT", tc=tc, var=var)
+    var = variables.Var(name=EC.gh, level_type=S.isobaricInhPa, level=900)
+    kwargs = dict(c=c, ds=da_with_leadtime.to_dataset(), varname=NOAA.HGT, tc=tc, var=var)
     new = variables.da_select(**kwargs)
     # latitude and longitude are unchanged
     assert all(new.latitude == da_with_leadtime.latitude)
@@ -135,8 +138,8 @@ def test_variables_da_select__attrs_not_coords(c, da_with_leadtime, tc):
     # where attributes are used by removing optional coordinates. The narrowing code will then not
     # be executed for these values in the function-under-test.
     da = da_with_leadtime.drop_vars(["lead_time", "level", "time"])
-    var = variables.Var(name="gh", level_type="isobaricInhPa", level=900)
-    kwargs = dict(c=c, ds=da.to_dataset(), varname="HGT", tc=tc, var=var)
+    var = variables.Var(name=EC.gh, level_type=S.isobaricInhPa, level=900)
+    kwargs = dict(c=c, ds=da.to_dataset(), varname=NOAA.HGT, tc=tc, var=var)
     new = variables.da_select(**kwargs)
     # latitude and longitude are unchanged
     assert all(new.latitude == da_with_leadtime.latitude)
@@ -144,7 +147,7 @@ def test_variables_da_select__attrs_not_coords(c, da_with_leadtime, tc):
 
 
 def test_variables_da_select__fail_bad_var(c, da_with_leadtime, tc):
-    var = variables.Var(name="foo", level_type="isobaricInhPa", level=900)
+    var = variables.Var(name="foo", level_type=S.isobaricInhPa, level=900)
     kwargs = dict(c=c, ds=da_with_leadtime.to_dataset(), varname="FOO", tc=tc, var=var)
     with raises(WXVXError) as e:
         variables.da_select(**kwargs)
@@ -155,8 +158,8 @@ def test_variables_da_select__fail_bad_var(c, da_with_leadtime, tc):
 
 
 def test_variables_ds_construct__latlon(c, check_cf_metadata):
-    c.forecast._projection = {"proj": "longlat"}
-    name = "HGT"
+    c.forecast._projection = {S.proj: "longlat"}
+    name = NOAA.HGT
     one = np.array([1], dtype="float32")
     da = xr.DataArray(
         data=one.reshape((1, 1, 1, 1)),
@@ -166,7 +169,7 @@ def test_variables_ds_construct__latlon(c, check_cf_metadata):
             latitude=[1],
             longitude=[1],
         ),
-        dims=("forecast_reference_time", "time", "latitude", "longitude"),
+        dims=(S.forecast_reference_time, S.time, S.latitude, S.longitude),
         name=name,
     )
     ds = variables.ds_construct(c=c, da=da, level=None, taskname="test")
@@ -174,17 +177,17 @@ def test_variables_ds_construct__latlon(c, check_cf_metadata):
 
 
 def test_variables_ds_construct__lcc(c, check_cf_metadata):
-    name = "HGT"
+    name = NOAA.HGT
     one = np.array([1], dtype="float32")
     da = xr.DataArray(
         data=one.reshape((1, 1, 1, 1)),
         coords=dict(
             forecast_reference_time=np.array([0], dtype="datetime64[ns]"),
             time=np.array([1], dtype="timedelta64[ns]"),
-            latitude=(["latitude", "longitude"], one.reshape((1, 1))),
-            longitude=(["latitude", "longitude"], one.reshape((1, 1))),
+            latitude=([S.latitude, S.longitude], one.reshape((1, 1))),
+            longitude=([S.latitude, S.longitude], one.reshape((1, 1))),
         ),
-        dims=("forecast_reference_time", "time", "latitude", "longitude"),
+        dims=(S.forecast_reference_time, S.time, S.latitude, S.longitude),
         name=name,
     )
     ds = variables.ds_construct(c=c, da=da, level=None, taskname="test")
@@ -192,11 +195,11 @@ def test_variables_ds_construct__lcc(c, check_cf_metadata):
 
 
 @mark.parametrize(
-    ("level_type", "level", "expected"),
+    (S.level_type, S.level, "expected"),
     [
-        ("atmosphere", None, "L000"),
-        ("heightAboveGround", "2", "Z002"),
-        ("isobaricInhPa", "900", "P900"),
+        (S.atmosphere, None, "L000"),
+        (S.heightAboveGround, "2", "Z002"),
+        (S.isobaricInhPa, "900", "P900"),
     ],
 )
 def test_variables_metlevel(level_type, level, expected):
@@ -210,7 +213,7 @@ def test_variables_metlevel__error():
 
 
 @mark.parametrize(
-    ("name", "obj"), [("GFS", variables.GFS), ("HRRR", variables.HRRR), ("FOO", None)]
+    ("name", "obj"), [(S.GFS, variables.GFS), (S.HRRR, variables.HRRR), ("FOO", None)]
 )
 def test_variables_model_class(name, obj):
     if obj is None:
@@ -230,7 +233,7 @@ def test_variables_model_names():
     class C2(B): ...
 
     assert variables.model_names(A) == {"B", "C1", "C2"}
-    assert variables.model_names() == {"GFS", "HRRR", "PREPBUFR"}
+    assert variables.model_names() == {S.GFS, S.HRRR, S.PREPBUFR}
 
 
 def test_variables__da_val__fail_unparesable(da_flat):
@@ -260,7 +263,7 @@ def test_variables__da_val__pass_attr_must_parse(da_flat):
 
 
 def test_variables__da_val__pass_coord(da_flat):
-    actual = variables._da_val(da=da_flat, key="time", desc="init time", t=np.datetime64)
+    actual = variables._da_val(da=da_flat, key=S.time, desc="init time", t=np.datetime64)
     assert actual == np.datetime64(0, "s")
 
 

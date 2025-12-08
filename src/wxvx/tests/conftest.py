@@ -14,6 +14,7 @@ from iotaa import Node
 from pytest import fixture
 
 from wxvx import times
+from wxvx.strings import NOAA, S
 from wxvx.types import Config
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ logging.getLogger().setLevel(logging.DEBUG)
 def check_cf_metadata() -> Callable:
     def check(ds: xr.DataArray, name: str, level: float | None = None):
         assert ds.attrs["Conventions"] == "CF-1.8"
-        level_actual = ds.attrs["level"]
+        level_actual = ds.attrs[S.level]
         if level:
             assert level_actual == level
         else:
@@ -34,10 +35,10 @@ def check_cf_metadata() -> Callable:
         da = ds[name]
         for k, v in [("standard_name", "geopotential_height"), ("units", "m")]:
             assert da.attrs[k] == v
-        for k, v in [("standard_name", "latitude"), ("units", "degrees_north")]:
+        for k, v in [("standard_name", S.latitude), ("units", "degrees_north")]:
             assert da.latitude.attrs[k] == v
-        assert da.forecast_reference_time.attrs["standard_name"] == "forecast_reference_time"
-        assert da.time.attrs["standard_name"] == "time"
+        assert da.forecast_reference_time.attrs["standard_name"] == S.forecast_reference_time
+        assert da.time.attrs["standard_name"] == S.time
 
     return check
 
@@ -55,85 +56,85 @@ def c_real_fs(config_data, gen_config, tmp_path):
 @fixture
 def config_data():
     return {
-        "baseline": {
-            "name": "HRRR",
-            "url": "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2",
+        S.baseline: {
+            S.name: "HRRR",
+            S.url: "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2",
         },
-        "cycles": {
-            "start": "2024-12-19T18:00:00",
-            "step": "12:00:00",
-            "stop": "2024-12-20T06:00:00",
+        S.cycles: {
+            S.start: "2024-12-19T18:00:00",
+            S.step: "12:00:00",
+            S.stop: "2024-12-20T06:00:00",
         },
-        "forecast": {
-            "coords": {
-                "latitude": "latitude",
-                "level": "level",
-                "longitude": "longitude",
-                "time": {
-                    "inittime": "time",
-                    "leadtime": "lead_time",
+        S.forecast: {
+            S.coords: {
+                S.latitude: "latitude",
+                S.level: "level",
+                S.longitude: "longitude",
+                S.time: {
+                    S.inittime: "time",
+                    S.leadtime: "lead_time",
                 },
             },
-            "mask": [
+            S.mask: [
                 [52.61564933, 225.90452027],
                 [52.61564933, 275.0],
                 [21.138123, 275.0],
                 [21.138123, 225.90452027],
             ],
-            "name": "Forecast",
-            "path": "/path/to/forecast-{{ yyyymmdd }}-{{ hh }}-{{ '%03d' % fh }}.nc",
-            "projection": {
+            S.name: "Forecast",
+            S.path: "/path/to/forecast-{{ yyyymmdd }}-{{ hh }}-{{ '%03d' % fh }}.nc",
+            S.projection: {
                 "a": 6371229,
                 "b": 6371229,
                 "lat_0": 38.5,
                 "lat_1": 38.5,
                 "lat_2": 38.5,
                 "lon_0": 262.5,
-                "proj": "lcc",
+                S.proj: "lcc",
             },
         },
-        "leadtimes": {
-            "start": "00:00:00",
-            "step": "06:00:00",
-            "stop": "12:00:00",
+        S.leadtimes: {
+            S.start: "00:00:00",
+            S.step: "06:00:00",
+            S.stop: "12:00:00",
         },
-        "paths": {
-            "grids": {
-                "baseline": "/path/to/grids/baseline",
-                "forecast": "/path/to/grids/forecast",
-                "truth": "/path/to/grids/truth",
+        S.paths: {
+            S.grids: {
+                S.baseline: "/path/to/grids/baseline",
+                S.forecast: "/path/to/grids/forecast",
+                S.truth: "/path/to/grids/truth",
             },
-            "obs": "/path/to/obs",
-            "run": "/path/to/run",
+            S.obs: "/path/to/obs",
+            S.run: "/path/to/run",
         },
-        "regrid": {
-            "method": "NEAREST",
-            "to": "forecast",
+        S.regrid: {
+            S.method: "NEAREST",
+            S.to: "forecast",
         },
-        "truth": {
-            "name": "GFS",
-            "type": "grid",
-            "url": "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2",
+        S.truth: {
+            S.name: "GFS",
+            S.type: "grid",
+            S.url: "https://some.url/{{ yyyymmdd }}/{{ hh }}/{{ '%02d' % fh }}/a.grib2",
         },
-        "variables": {
-            "HGT": {
-                "level_type": "isobaricInhPa",
-                "levels": [900],
-                "name": "gh",
+        S.variables: {
+            NOAA.HGT: {
+                S.level_type: "isobaricInhPa",
+                S.levels: [900],
+                S.name: "gh",
             },
-            "REFC": {
-                "level_type": "atmosphere",
-                "name": "refc",
+            NOAA.REFC: {
+                S.level_type: "atmosphere",
+                S.name: "refc",
             },
-            "SPFH": {
-                "level_type": "isobaricInhPa",
-                "levels": [900, 1000],
-                "name": "q",
+            NOAA.SPFH: {
+                S.level_type: "isobaricInhPa",
+                S.levels: [900, 1000],
+                S.name: "q",
             },
-            "T2M": {
-                "level_type": "heightAboveGround",
-                "levels": [2],
-                "name": "2t",
+            NOAA.T2M: {
+                S.level_type: "heightAboveGround",
+                S.levels: [2],
+                S.name: "2t",
             },
         },
     }
@@ -143,7 +144,7 @@ def config_data():
 def da_with_leadtime() -> xr.DataArray:
     one = np.array([1], dtype="float32")
     return xr.DataArray(
-        name="HGT",
+        name=NOAA.HGT,
         data=one.reshape((1, 1, 1, 1, 1)),
         dims=["latitude", "longitude", "level", "time", "lead_time"],
         coords=dict(
@@ -160,7 +161,7 @@ def da_with_leadtime() -> xr.DataArray:
 def da_with_validtime() -> xr.DataArray:
     one = np.array([1], dtype="float32")
     return xr.DataArray(
-        name="HGT",
+        name=NOAA.HGT,
         data=one.reshape((1, 1, 1, 1, 1)),
         dims=["latitude", "longitude", "level", "time", "validtime"],
         coords=dict(
@@ -181,21 +182,27 @@ def fakefs(fs):
 @fixture
 def gen_config():
     def gen_config(config_data, rootpath) -> Config:
-        dirs = ("grids/baseline", "grids/forecast", "grids/truth", "obs", "run")
+        dirs = (
+            f"{S.grids}/{S.baseline}",
+            f"{S.grids}/{S.forecast}",
+            f"{S.grids}/{S.truth}",
+            S.obs,
+            S.run,
+        )
         grids_baseline, grids_forecast, grids_truth, obs, run = [str(rootpath / x) for x in dirs]
         for x in grids_truth, grids_forecast, obs, run:
             Path(x).mkdir(parents=True)
         return Config(
             {
                 **config_data,
-                "paths": {
-                    "grids": {
-                        "baseline": grids_baseline,
-                        "forecast": grids_forecast,
-                        "truth": grids_truth,
+                S.paths: {
+                    S.grids: {
+                        S.baseline: grids_baseline,
+                        S.forecast: grids_forecast,
+                        S.truth: grids_truth,
                     },
-                    "obs": obs,
-                    "run": run,
+                    S.obs: obs,
+                    S.run: run,
                 },
             }
         )

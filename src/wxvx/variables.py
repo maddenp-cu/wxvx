@@ -11,6 +11,7 @@ import numpy as np
 import xarray as xr
 from pyproj import Proj
 
+from wxvx.strings import EC, MET, NOAA, S
 from wxvx.types import Coords, VarMeta
 from wxvx.util import WXVXError, render
 
@@ -28,9 +29,9 @@ VARMETA = {
         VarMeta(
             description="2m Temperature",
             cf_standard_name="air_temperature",
-            level_type="heightAboveGround",
-            met_stats=["ME", "RMSE"],
-            name="2t",
+            level_type=S.heightAboveGround,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.t2,
             units="K",
         ),
         VarMeta(
@@ -38,83 +39,83 @@ VARMETA = {
             cat_thresh=[">=20", ">=30", ">=40"],
             cf_standard_name="unknown",
             cnt_thresh=[">15"],
-            level_type="atmosphere",
-            met_stats=["FSS", "PODY"],
-            name="refc",
-            nbrhd_shape="CIRCLE",
+            level_type=S.atmosphere,
+            met_stats=[MET.FSS, MET.PODY],
+            name=EC.refc,
+            nbrhd_shape=MET.CIRCLE,
             nbrhd_width=[3, 5, 11],
             units="dBZ",
         ),
         VarMeta(
             description="Geopotential Height at {level} mb",
             cf_standard_name="geopotential_height",
-            level_type="isobaricInhPa",
-            met_stats=["ME", "RMSE"],
-            name="gh",
+            level_type=S.isobaricInhPa,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.gh,
             units="m",
         ),
         VarMeta(
             description="Specific Humidity at {level} mb",
             cf_standard_name="specific_humidity",
-            level_type="isobaricInhPa",
-            met_stats=["ME", "RMSE"],
-            name="q",
+            level_type=S.isobaricInhPa,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.q,
             units="1",
         ),
         VarMeta(
             description="Surface Pressure",
             cf_standard_name="surface_air_pressure",
-            level_type="surface",
-            met_stats=["ME", "RMSE"],
-            name="sp",
+            level_type=S.surface,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.sp,
             units="Pa",
         ),
         VarMeta(
             description="Temperature at {level} mb",
             cf_standard_name="air_temperature",
-            level_type="isobaricInhPa",
-            met_stats=["ME", "RMSE"],
-            name="t",
+            level_type=S.isobaricInhPa,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.t,
             units="K",
         ),
         VarMeta(
             description="U-Component of Wind at {level} mb",
             cf_standard_name="eastward_wind",
-            level_type="isobaricInhPa",
-            met_stats=["ME", "RMSE"],
-            name="u",
+            level_type=S.isobaricInhPa,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.u,
             units="m s-1",
         ),
         VarMeta(
             description="U-Component of Wind at 10m",
             cf_standard_name="eastward_wind",
-            level_type="heightAboveGround",
-            met_stats=["ME", "RMSE"],
-            name="u_10m",
+            level_type=S.heightAboveGround,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.u_10m,
             units="m s-1",
         ),
         VarMeta(
             description="V-Component of Wind at {level} mb",
             cf_standard_name="northward_wind",
-            level_type="isobaricInhPa",
-            met_stats=["ME", "RMSE"],
-            name="v",
+            level_type=S.isobaricInhPa,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.v,
             units="m s-1",
         ),
         VarMeta(
             description="V-Component of Wind at 10m",
             cf_standard_name="northward_wind",
-            level_type="heightAboveGround",
-            met_stats=["ME", "RMSE"],
-            name="v_10m",
+            level_type=S.heightAboveGround,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.v_10m,
             units="m s-1",
         ),
         VarMeta(
             description="Vertical Velocity at {level} mb",
             cf_standard_name="lagrangian_tendency_of_air_pressure",
-            level_type="isobaricInhPa",
-            met_stats=["ME", "RMSE"],
-            name="w",
+            level_type=S.isobaricInhPa,
+            met_stats=[MET.ME, MET.RMSE],
+            name=EC.w,
             units="Pa s-1",
         ),
     ]
@@ -131,7 +132,7 @@ class Var:
         self.level_type = level_type
         self.level = level
         self._keys = (
-            {"name", "level_type", "level"} if self.level is not None else {"name", "level_type"}
+            {S.name, S.level_type, S.level} if self.level is not None else {S.name, S.level_type}
         )
 
     def __eq__(self, other):
@@ -169,53 +170,53 @@ class GFS(Var):
         self.firstbyte: int = firstbyte
         self.lastbyte: int | None = lastbyte if lastbyte > -1 else None
         self._keys = (
-            {"name", "level_type", "level", "firstbyte", "lastbyte"}
+            {S.name, S.level_type, S.level, S.firstbyte, S.lastbyte}
             if self.level is not None
-            else {"name", "level_type", "firstbyte", "lastbyte"}
+            else {S.name, S.level_type, S.firstbyte, S.lastbyte}
         )
 
     @staticmethod
     def varname(name: str) -> str:
         return {
-            "2t": "TMP",
-            "gh": "HGT",
-            "q": "SPFH",
-            "refc": "REFC",
-            "sp": "PRES",
-            "t": "TMP",
-            "u": "UGRD",
-            "u_10m": "UGRD",
-            "v": "VGRD",
-            "v_10m": "VGRD",
-            "w": "VVEL",
+            EC.t2: NOAA.TMP,
+            EC.gh: NOAA.HGT,
+            EC.q: NOAA.SPFH,
+            EC.refc: NOAA.REFC,
+            EC.sp: NOAA.PRES,
+            EC.t: NOAA.TMP,
+            EC.u: NOAA.UGRD,
+            EC.u_10m: NOAA.UGRD,
+            EC.v: NOAA.VGRD,
+            EC.v_10m: NOAA.VGRD,
+            EC.w: NOAA.VVEL,
         }.get(name, UNKNOWN)
 
     @staticmethod
     def _canonicalize(name: str, level_type: str) -> str:
         return {
-            ("HGT", "isobaricInhPa"): "gh",
-            ("PRES", "surface"): "sp",
-            ("REFC", "atmosphere"): "refc",
-            ("SPFH", "isobaricInhPa"): "q",
-            ("TMP", "heightAboveGround"): "2t",
-            ("TMP", "isobaricInhPa"): "t",
-            ("UGRD", "heightAboveGround"): "u_10m",
-            ("UGRD", "isobaricInhPa"): "u",
-            ("VGRD", "heightAboveGround"): "v_10m",
-            ("VGRD", "isobaricInhPa"): "v",
-            ("VVEL", "isobaricInhPa"): "w",
+            (NOAA.HGT, S.isobaricInhPa): EC.gh,
+            (NOAA.PRES, S.surface): EC.sp,
+            (NOAA.REFC, S.atmosphere): EC.refc,
+            (NOAA.SPFH, S.isobaricInhPa): EC.q,
+            (NOAA.TMP, S.heightAboveGround): EC.t2,
+            (NOAA.TMP, S.isobaricInhPa): EC.t,
+            (NOAA.UGRD, S.heightAboveGround): EC.u_10m,
+            (NOAA.UGRD, S.isobaricInhPa): EC.u,
+            (NOAA.VGRD, S.heightAboveGround): EC.v_10m,
+            (NOAA.VGRD, S.isobaricInhPa): EC.v,
+            (NOAA.VVEL, S.isobaricInhPa): EC.w,
         }.get((name, level_type), UNKNOWN)
 
     @staticmethod
     def _levinfo(levstr: str) -> tuple[str, float | int | None]:
         if m := re.match(r"^entire atmosphere$", levstr):
-            return ("atmosphere", None)
+            return (S.atmosphere, None)
         if m := re.match(r"^(\d+(\.\d+)?) m above ground$", levstr):
-            return ("heightAboveGround", _levelstr2num(m[1]))
+            return (S.heightAboveGround, _levelstr2num(m[1]))
         if m := re.match(r"^(\d+(\.\d+)?) mb$", levstr):
-            return ("isobaricInhPa", _levelstr2num(m[1]))
+            return (S.isobaricInhPa, _levelstr2num(m[1]))
         if m := re.match(r"^surface$", levstr):
-            return ("surface", None)
+            return (S.surface, None)
         return (UNKNOWN, None)
 
 
@@ -232,7 +233,7 @@ class HRRR(GFS):
             "lat_1": 38.5,
             "lat_2": 38.5,
             "lon_0": 262.5,
-            "proj": "lcc",
+            S.proj: "lcc",
         }
     )
 
@@ -251,19 +252,19 @@ def da_construct(c: Config, da: xr.DataArray) -> xr.DataArray:
     leadtime = c.forecast.coords.time.leadtime
     validtime = c.forecast.coords.time.validtime
     if leadtime is not None:
-        time = inittime + _da_val(da, leadtime, "leadtime", np.timedelta64)
+        time = inittime + _da_val(da, leadtime, S.leadtime, np.timedelta64)
     else:
         assert validtime is not None
-        time = _da_val(da, validtime, "validtime", np.datetime64)
+        time = _da_val(da, validtime, S.validtime, np.datetime64)
     return xr.DataArray(
-        data=da.expand_dims(dim=["forecast_reference_time", "time"]),
+        data=da.expand_dims(dim=[S.forecast_reference_time, S.time]),
         coords=dict(
             forecast_reference_time=[inittime + np.timedelta64(0, "s")],
             time=[time],
             latitude=da[c.forecast.coords.latitude],
             longitude=da[c.forecast.coords.longitude],
         ),
-        dims=("forecast_reference_time", "time", "latitude", "longitude"),
+        dims=(S.forecast_reference_time, S.time, S.latitude, S.longitude),
         name=da.name,
     )
 
@@ -298,16 +299,16 @@ def da_select(c: Config, ds: xr.Dataset, varname: str, tc: TimeCoords, var: Var)
 
 def ds_construct(c: Config, da: xr.DataArray, taskname: str, level: float | None) -> xr.Dataset:
     logging.info("%s: Creating CF-compliant %s dataset", taskname, da.name)
-    coord_names = ("forecast_reference_time", "time", "latitude", "longitude")
+    coord_names = (S.forecast_reference_time, S.time, S.latitude, S.longitude)
     assert len(da.shape) == len(coord_names)
     proj = Proj(c.forecast.projection)
     latlon = proj.name == "longlat"  # yes, "longlat"
-    dims = ["forecast_reference_time", "time"]
-    dims.extend(["latitude", "longitude"] if latlon else ["y", "x"])
+    dims = [S.forecast_reference_time, S.time]
+    dims.extend([S.latitude, S.longitude] if latlon else ["y", "x"])
     crs = "CRS"
-    meta = VARMETA[c.variables[da.name]["name"]]
+    meta = VARMETA[c.variables[da.name][S.name]]
     attrs = dict(grid_mapping=crs, standard_name=meta.cf_standard_name, units=meta.units)
-    dims_lat, dims_lon = ([k] if latlon else ["y", "x"] for k in ["latitude", "longitude"])
+    dims_lat, dims_lon = ([k] if latlon else ["y", "x"] for k in [S.latitude, S.longitude])
     coords = dict(
         zip(
             coord_names,
@@ -335,10 +336,10 @@ def ds_construct(c: Config, da: xr.DataArray, taskname: str, level: float | None
 def metlevel(level_type: str, level: float | None) -> str:
     try:
         prefix = {
-            "atmosphere": "L",
-            "heightAboveGround": "Z",
-            "isobaricInhPa": "P",
-            "surface": "Z",
+            S.atmosphere: "L",
+            S.heightAboveGround: "Z",
+            S.isobaricInhPa: "P",
+            S.surface: "Z",
         }[level_type]
     except KeyError as e:
         raise WXVXError("No MET level defined for level type %s" % level_type) from e
@@ -386,10 +387,10 @@ def _da_crs(proj: Proj) -> xr.DataArray:
 def _da_grid_coords(
     da: xr.DataArray, proj: Proj, k: Literal["latitude", "longitude"]
 ) -> np.ndarray:
-    ks = ("latitude", "longitude")
+    ks = (S.latitude, S.longitude)
     assert k in ks
     lats, lons = [da[k].values for k in ks]
-    i1, i2 = {"latitude": (lambda n: (n, 0), 1), "longitude": (lambda n: (0, n), 0)}[k]
+    i1, i2 = {S.latitude: (lambda n: (n, 0), 1), S.longitude: (lambda n: (0, n), 0)}[k]
     return np.array([proj(lons[i1(n)], lats[i1(n)])[i2] for n in range(da.latitude.sizes[k])])
 
 
@@ -397,9 +398,9 @@ def _da_to_forecast_reference_time(da: xr.DataArray) -> xr.DataArray:
     var = da.forecast_reference_time
     return xr.DataArray(
         data=var.values,
-        dims=["forecast_reference_time"],
+        dims=[S.forecast_reference_time],
         name=var.name,
-        attrs=dict(standard_name="forecast_reference_time"),
+        attrs=dict(standard_name=S.forecast_reference_time),
     )
 
 
@@ -409,7 +410,7 @@ def _da_to_latitude(da: xr.DataArray, dims: list[str]) -> xr.DataArray:
         data=var.values,
         dims=dims,
         name=var.name,
-        attrs=dict(standard_name="latitude", units="degrees_north"),
+        attrs=dict(standard_name=S.latitude, units="degrees_north"),
     )
 
 
@@ -419,14 +420,14 @@ def _da_to_longitude(da: xr.DataArray, dims=list[str]) -> xr.DataArray:
         data=var.values,
         dims=dims,
         name=var.name,
-        attrs=dict(standard_name="longitude", units="degrees_east"),
+        attrs=dict(standard_name=S.longitude, units="degrees_east"),
     )
 
 
 def _da_to_time(da: xr.DataArray) -> xr.DataArray:
     var = da.time
     return xr.DataArray(
-        data=var.values, dims=["time"], name=var.name, attrs=dict(standard_name="time")
+        data=var.values, dims=[S.time], name=var.name, attrs=dict(standard_name=S.time)
     )
 
 

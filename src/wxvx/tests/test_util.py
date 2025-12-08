@@ -12,6 +12,7 @@ from unittest.mock import patch
 from pytest import mark, raises
 
 from wxvx import util
+from wxvx.strings import S
 from wxvx.times import TimeCoords
 
 # Tests
@@ -92,7 +93,7 @@ def test_util_classify_data_format__zarr_missing(fakefs, logged):
 
 
 @mark.parametrize(
-    ("url", "expected_scheme"),
+    (S.url, "expected_scheme"),
     [
         ("http://example.com/path/to/gfs.t00z.pgrb2.0p25.f001", util.Proximity.REMOTE),
         ("file:///path/to/gfs.t00z.pgrb2.0p25.f001", util.Proximity.LOCAL),
@@ -153,7 +154,7 @@ def test_util_fail(caplog):
     assert e.value.code == 1
 
 
-@mark.parametrize("env", [{"PI": "3.14"}, None])
+@mark.parametrize(S.env, [{"PI": "3.14"}, None])
 @mark.parametrize("delpool", [True, False])
 def test_util_mpexec(delpool, env, tmp_path):
     # This is safe because pytest-xdist parallelizes across *processes*, and each process has its
@@ -161,7 +162,7 @@ def test_util_mpexec(delpool, env, tmp_path):
     # no other test is modifying the state / pool.
     util._initpool()
     if delpool:
-        del util._STATE["pool"]
+        del util._STATE[S.pool]
     path = tmp_path / "out"
     cmd = 'echo "$PI" >%s' % path
     util.mpexec(cmd=cmd, rundir=tmp_path, taskname="foo", env=env)
