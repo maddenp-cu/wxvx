@@ -40,6 +40,7 @@ test:
     - pytest-cov 7.0.*
     - pytest-xdist 3.8.*
     - ruff 0.14.*
+    - types-PyYAML
     - {{ python }}
 about:
   license: APACHE
