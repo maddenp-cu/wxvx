@@ -35,6 +35,7 @@ test:
     - jq 1.8.*
     - make 4.4.*
     - mypy 1.19.*
+    - pandas-stubs
     - pyfakefs 5.10.*
     - pytest 9.0.*
     - pytest-cov 7.0.*
@@ -42,6 +43,8 @@ test:
     - pytest-xdist 3.8.*
     - ruff 0.14.*
     - types-PyYAML
+    - types-requests
+    - types-seaborn
     - {{ python }}
 about:
   license: APACHE
