@@ -12,7 +12,6 @@ from multiprocessing.pool import Pool
 from pathlib import Path
 from signal import SIG_IGN, SIGINT, signal
 from subprocess import CompletedProcess, run
-from threading import Lock
 from typing import TYPE_CHECKING, NoReturn, cast, overload
 from urllib.parse import urlparse
 
@@ -28,7 +27,10 @@ if TYPE_CHECKING:
 
     from wxvx.times import TimeCoords
 
-_POOL_LOCK = Lock()
+# The pool must be initialized via initialize_pool() before mpexec() is called. The 'processes'
+# argument should be the number of threads in use, so the call is made from wxvx.cli.main() where
+# this is known.
+
 _STATE: dict = {}
 
 pkgname = __name__.split(".", maxsplit=1)[0]
@@ -117,8 +119,21 @@ def expand(start, step, stop):
 def fail(msg: str | None = None, *args) -> NoReturn:
     if msg:
         logging.error(msg, *args)
-    shutdown()
+    finalize_pool()
     sys.exit(1)
+
+
+def finalize_pool() -> None:
+    # Only call from a serial context. See the "Warning" section in:
+    # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.pool.Pool
+    if pool := _STATE.get(S.pool):
+        pool.close()
+        pool.terminate()
+        pool.join()
+
+
+def initialize_pool(processes: int) -> None:
+    _STATE[S.pool] = Pool(processes=processes, initializer=signal, initargs=(SIGINT, SIG_IGN))
 
 
 def mpexec(cmd: str, rundir: Path, taskname: str, env: dict | None = None) -> CompletedProcess:
@@ -127,9 +142,6 @@ def mpexec(cmd: str, rundir: Path, taskname: str, env: dict | None = None) -> Co
     kwds = {"capture_output": True, "check": False, "cwd": rundir, "shell": True, "text": True}
     if env:
         kwds[S.env] = env
-    with _POOL_LOCK:
-        if S.pool not in _STATE:
-            _initpool()
     result: CompletedProcess = _STATE[S.pool].apply(run, (cmd,), kwds)  # i.e. subprocess.run
     if result.returncode != 0:
         logging.error("%s: %s", taskname, result)
@@ -157,14 +169,6 @@ def resource(relpath: str | Path) -> str:
         return f.read()
 
 
-def shutdown() -> None:
-    # Only call from a serial context. See the "Warning" section in:
-    # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.pool.Pool
-    if pool := _STATE.get(S.pool):
-        pool.close()
-        pool.terminate()
-
-
 def resource_path(relpath: str | Path) -> Path:
     return cast(Path, resources.files(f"{pkgname}.resources").joinpath(str(relpath)))
 
@@ -186,7 +190,3 @@ def to_timedelta(value: str | int) -> timedelta:
 def version() -> str:
     info = json.loads(resource("info.json"))
     return "version %s build %s" % (info["version"], info["buildnum"])
-
-
-def _initpool() -> None:
-    _STATE[S.pool] = Pool(initializer=signal, initargs=(SIGINT, SIG_IGN))
