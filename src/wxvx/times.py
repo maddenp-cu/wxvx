@@ -23,25 +23,29 @@ class TimeCoords:
         self.hh = hh(self.validtime)
 
     def __eq__(self, other):
-        return hash(self) == hash(other)
+        return self.cycle == other.cycle and self.leadtime == other.leadtime
 
     def __hash__(self):
-        return int(self.validtime.timestamp())
+        return hash((self.cycle, self.leadtime))
 
     def __lt__(self, other):
-        return hash(self) < hash(other)
+        return (self.cycle, self.leadtime) < (other.cycle, other.leadtime)
 
     def __repr__(self):
         return self.validtime.isoformat()
 
 
-def gen_validtimes(cycles: Cycles, leadtimes: Leadtimes) -> list[TimeCoords]:
+def gen_timecoords(cycles: Cycles, leadtimes: Leadtimes) -> list[TimeCoords]:
     return sorted(
         {
             TimeCoords(cycle=cycle, leadtime=leadtime)
             for cycle, leadtime in product(cycles.values, leadtimes.values)
         }
     )
+
+
+def gen_timecoords_truth(cycles: Cycles, leadtimes: Leadtimes) -> list[TimeCoords]:
+    return sorted({TimeCoords(cycle=tc.validtime) for tc in gen_timecoords(cycles, leadtimes)})
 
 
 def hh(dt: datetime) -> str:

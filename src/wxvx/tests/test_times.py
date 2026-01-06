@@ -17,8 +17,7 @@ from wxvx.types import Cycles, Leadtimes
 def test_times_TimeCoords(leadtime, utc):
     cycle = utc(2025, 1, 28, 12)
     tc = times.TimeCoords(cycle=cycle, leadtime=leadtime)
-    ltobj = leadtime if isinstance(leadtime, timedelta) else timedelta(hours=leadtime)
-    assert hash(tc) == (cycle + ltobj).timestamp()
+    assert hash(tc) == hash((cycle, timedelta(hours=1)))
     assert tc < times.TimeCoords(cycle=cycle, leadtime=timedelta(hours=2))
     assert tc == times.TimeCoords(cycle=cycle, leadtime=timedelta(hours=1))
     assert tc > times.TimeCoords(cycle=cycle, leadtime=timedelta(hours=0))
@@ -31,7 +30,7 @@ def test_times_TimeCoords(leadtime, utc):
 def test_times_TimeCoords__no_leadtime(utc):
     cycle = utc(2025, 1, 28, 12)
     tc = times.TimeCoords(cycle=cycle)
-    assert hash(tc) == cycle.timestamp()
+    assert hash(tc) == hash((cycle, timedelta(hours=0)))
     assert tc < times.TimeCoords(cycle=cycle, leadtime=timedelta(hours=1))
     assert tc == times.TimeCoords(cycle=cycle, leadtime=timedelta(hours=0))
     assert tc > times.TimeCoords(cycle=cycle, leadtime=timedelta(hours=-1))
@@ -41,21 +40,34 @@ def test_times_TimeCoords__no_leadtime(utc):
     assert tc.yyyymmdd == "20250128"
 
 
-def test_times_gen_validtimes(config_data, utc):
-    actual = {
-        vt.validtime
-        for vt in times.gen_validtimes(
-            cycles=Cycles(raw=config_data[S.cycles]),
-            leadtimes=Leadtimes(raw=config_data[S.leadtimes]),
-        )
-    }
-    expected = {
-        utc(2024, 12, 19, 18),
-        utc(2024, 12, 20, 0),
-        utc(2024, 12, 20, 6),
-        utc(2024, 12, 20, 12),
-        utc(2024, 12, 20, 18),
-    }
+def test_times_gen_timecoords(config_data, utc):
+    actual = times.gen_timecoords(
+        cycles=Cycles(raw=config_data[S.cycles]),
+        leadtimes=Leadtimes(raw=config_data[S.leadtimes]),
+    )
+    expected = [
+        times.TimeCoords(cycle=utc(2024, 12, 19, 18), leadtime=0),
+        times.TimeCoords(cycle=utc(2024, 12, 19, 18), leadtime=6),
+        times.TimeCoords(cycle=utc(2024, 12, 19, 18), leadtime=12),
+        times.TimeCoords(cycle=utc(2024, 12, 20, 6), leadtime=0),
+        times.TimeCoords(cycle=utc(2024, 12, 20, 6), leadtime=6),
+        times.TimeCoords(cycle=utc(2024, 12, 20, 6), leadtime=12),
+    ]
+    assert actual == expected
+
+
+def test_times_gen_timecoords_truth(config_data, utc):
+    actual = times.gen_timecoords_truth(
+        cycles=Cycles(raw=config_data[S.cycles]),
+        leadtimes=Leadtimes(raw=config_data[S.leadtimes]),
+    )
+    expected = [
+        times.TimeCoords(cycle=utc(2024, 12, 19, 18), leadtime=0),
+        times.TimeCoords(cycle=utc(2024, 12, 20, 0), leadtime=0),
+        times.TimeCoords(cycle=utc(2024, 12, 20, 6), leadtime=0),
+        times.TimeCoords(cycle=utc(2024, 12, 20, 12), leadtime=0),
+        times.TimeCoords(cycle=utc(2024, 12, 20, 18), leadtime=0),
+    ]
     assert actual == expected
 
 
