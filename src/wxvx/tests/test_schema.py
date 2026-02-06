@@ -35,6 +35,10 @@ def test_schema(logged, config_data, fs):
     # Additional keys are not allowed:
     assert not ok(with_set(config, 42, "n"))
     assert logged("'n' was unexpected")
+    # Some keys have boolean values:
+    for key in [S.ncdiffs]:
+        assert not ok(with_set(config, None, key))
+        assert logged("None is not of type 'boolean'")
     # Some keys have object values:
     for key in [S.cycles, S.leadtimes]:
         assert not ok(with_set(config, None, key))
