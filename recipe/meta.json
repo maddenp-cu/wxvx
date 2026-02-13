@@ -1,6 +1,6 @@
 {
-  "build": "py_0",
-  "buildnum": 0,
+  "build": "py_1",
+  "buildnum": 1,
   "name": "wxvx",
   "packages": {
     "dev": [
@@ -8,12 +8,12 @@
       "iotaa ==1.6.*",
       "jq ==1.8.*",
       "make ==4.4.*",
-      "met2go ==11.0.*",
+      "met2go ==11.0.3.*",
       "mypy ==1.19.*",
       "netcdf4 ==1.7.*",
       "pandas-stubs",
       "pip",
-      "pyfakefs ==5.10.*",
+      "pyfakefs ==6.1.*",
       "pyproj ==3.7.*",
       "pytest ==9.0.*",
       "pytest-cov ==7.0.*",
@@ -24,19 +24,19 @@
       "python-magic ==0.4.*",
       "pyyaml ==6.0.*",
       "requests ==2.32.*",
-      "ruff ==0.14.*",
+      "ruff ==0.15.*",
       "seaborn ==0.13.*",
       "setuptools",
       "types-PyYAML",
       "types-requests",
       "types-seaborn",
-      "uwtools ==2.12.*",
-      "xarray ==2025.1.*",
+      "uwtools ==2.13.*",
+      "xarray ==2025.12.*",
       "zarr ==3.1.*"
     ],
     "run": [
       "iotaa ==1.6.*",
-      "met2go ==11.0.*",
+      "met2go ==11.0.3.*",
       "netcdf4 ==1.7.*",
       "pyproj ==3.7.*",
       "python ==3.13",
@@ -45,8 +45,8 @@
       "pyyaml ==6.0.*",
       "requests ==2.32.*",
       "seaborn ==0.13.*",
-      "uwtools ==2.12.*",
-      "xarray ==2025.1.*",
+      "uwtools ==2.13.*",
+      "xarray ==2025.12.*",
       "zarr ==3.1.*"
     ]
   },
