@@ -430,13 +430,14 @@ In the GitHub web interface:
 
 1. Click **Releases**.
 2. Click **Draft a new release**.
-3. Click **Tag: Select tag**, enter the version number with a "v" prefix, e.g. `v1.2.3`, then click **Create new tag**. The pop-up that appears should inform you that the tag will be created on publish. Click **Create**.
+3. Click **Tag: Select tag**, enter the version number with a "v" prefix, e.g. `v1.2.3`, then click **Create new tag**. (Suffix the version number with a hyphen and the build number if the release is a build update only, e.g. `v1.2.3-1` for build 1 of version `v1.2.3`). The pop-up that appears should inform you that the tag will be created on publish. Click **Create**.
 4. Ensure that **Target** is set to `main`.
-5. Enter the tag value (e.g. `v1.2.3`) as the **Release title**.
-6. Click **Generate release notes**.
-7. Edit the **Release notes** text box, follwing the style established by previous release notes.
-8. Ensure that **Set as the latest release** is selected.
-9. Click the green **Publish release** button.
+5. Enter the same tag value as created above as the **Release title**.
+6. Set **Previous tag:** appropriately.
+7. Click **Generate release notes**.
+8. Edit the **Release notes** text box, follwing the style established by previous release notes.
+9. Ensure that **Set as the latest release** is selected.
+10. Click the green **Publish release** button.
 
 ### Publish a conda Package
 
