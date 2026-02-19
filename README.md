@@ -422,7 +422,7 @@ To update the version or build number:
 2. In a `base` conda environment with the `condev` package installed (see above), run `make meta`. This will update the `recipe/meta.*` files.
 3. Commit these changes.
 
-### Release Procedure
+## Release Procedure
 
 ### Create a GitHub Release
 
