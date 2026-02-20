@@ -17,14 +17,14 @@ from typing import TYPE_CHECKING, NoReturn, cast, overload
 from urllib.parse import urlparse
 
 import jinja2
-import magic
+import netCDF4
 import zarr
 
 from wxvx.strings import MET, S
 from wxvx.times import tcinfo
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from wxvx.times import TimeCoords
 
@@ -71,28 +71,38 @@ def atomic(path: Path) -> Iterator[Path]:
 
 @cache
 def classify_data_format(path: str | Path) -> DataFormat:
-    path = Path(path)
-    if path.is_file():
-        inferred = magic.from_file(path.resolve())
-        for pre, fmt in [
-            ("Binary Universal Form data (BUFR)", DataFormat.BUFR),
-            ("Gridded binary (GRIB)", DataFormat.GRIB),
-            ("Hierarchical Data Format", DataFormat.NETCDF),
-        ]:
-            if inferred.startswith(pre):
-                return fmt
-    elif path.is_dir():
+    def check(f: Callable) -> bool:
         try:
-            zarr.open(path, mode="r")
+            f()
         except Exception as e:
             for line in str(e).split():
-                logging.exception(line)
-        else:
-            return DataFormat.ZARR
-    else:
+                logging.debug(line)
+            return False
+        return True
+
+    def grib(path: Path) -> None:
+        # It might be better to just try to read the file with a GRIB library like cfgrib, but this
+        # tends to be unacceptably slow: Since a GRIB file is just a series of messages without any
+        # kind of header/metadata, cfgrib et al. read the entire file. Instead, inspect the initial
+        # bytes in the file to see if it is apparently GRIB.
+        with path.open(mode="rb") as f:
+            header = f.read(8)
+        editions = (1, 2)
+        apparently_grib = header[:4] == b"GRIB" and header[7] in editions
+        assert apparently_grib
+
+    path = Path(path)
+    if not path.exists():
         logging.warning("Path not found: %s", path)
         return DataFormat.UNKNOWN
-    logging.error("Could not determine format of %s", path)
+    if check(lambda: zarr.open(path, mode="r")):
+        return DataFormat.ZARR
+    if check(lambda: netCDF4.Dataset(path, mode="r")):
+        return DataFormat.NETCDF
+    if check(lambda: grib(path)):
+        return DataFormat.GRIB
+
+    logging.error("Could not determine format of: %s", path)
     return DataFormat.UNKNOWN
 
 

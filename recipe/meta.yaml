@@ -21,7 +21,6 @@ requirements:
     - netcdf4 1.7.*
     - pyproj 3.7.*
     - python-eccodes 2.42.*
-    - python-magic 0.4.*
     - pyyaml 6.0.*
     - requests 2.32.*
     - seaborn 0.13.*
