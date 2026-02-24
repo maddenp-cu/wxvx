@@ -286,7 +286,7 @@ Some values may include Jinja2 expressions, processed at run-time with [`jinja2.
 
 ```
 $ wxvx --help
-usage: wxvx [-c FILE] [-t TASK] [-d] [-h] [-k] [-l] [-n N] [-s] [-v]
+usage: wxvx [-c FILE] [-t TASK] [-d] [-f] [-h] [-k] [-l] [-n N] [-s] [-v]
 
 wxvx
 
@@ -299,6 +299,8 @@ Required arguments:
 Optional arguments:
   -d, --debug
       Log all messages
+  -f, --fail
+      Exit with error status if task is incomplete
   -h, --help
       Show help and exit
   -k, --check
@@ -312,6 +314,10 @@ Optional arguments:
   -v, --version
       Show version and exit
 ```
+
+In many cases, for example when analyses or observations are not yet available to verify leading-edge forecast leadtimes, `wxvx` will not be able to complete the entire verification workflow in a single invocation, but to make partial progress each time it is iterated, to eventual completion. For this reason, `wxvx` defaults to exiting with `0` (success) status even if the requested task is incomplete.
+
+In some (e.g. retrospective) cases, however, it may be expected that the entire workflow will complete in a single invocation, and that failure to do so is an error. In these cases, the `-f` / `--fail` switch may be used to tell `wxvx` to exit with `1` (error) status if the requested task is incomplete.
 
 ### Example
 
