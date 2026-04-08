@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
     from wxvx.types import Config, VarMeta
 
+_EC_LOCK = Lock()
 _PLOT_LOCK = Lock()
 
 # Public tasks
@@ -301,74 +302,52 @@ def _grib_index_data_wgrib2(c: Config, outdir: Path, tc: TimeCoords, url: str):
 
 @task
 def _grib_index_file_eccodes(c: Config, grib_path: Path, tc: TimeCoords, source: Source):
+    gridsdir = {
+        Source.BASELINE: c.paths.grids_baseline,
+        Source.FORECAST: c.paths.grids_forecast,
+        Source.TRUTH: c.paths.grids_truth,
+    }[source]
     yyyymmdd, hh, leadtime = tcinfo(tc)
-    gridsdir = c.paths.grids_truth if source is Source.TRUTH else c.paths.grids_baseline
     outdir = gridsdir / yyyymmdd / hh / leadtime
     path = outdir / f"{grib_path.name}.ecidx"
     taskname = "GRIB index file %s %s" % (path, _at_validtime(tc))
     yield taskname
     yield Asset(path, path.is_file)
     yield _existing(grib_path)
-    grib_index_keys = [S.shortName, S.typeOfLevel, S.level]
-    idx = ec.codes_index_new_from_file(str(grib_path), grib_index_keys)
-    with atomic(path) as tmp:
-        ec.codes_index_write(idx, str(tmp))
-    logging.info("%s: Wrote %s", taskname, path)
-
-
-@task
-def _grib_message_in_file(c: Config, path: Path, tc: TimeCoords, var: Var, source: Source):
-    taskname = "GRIB message for %s in %s %s" % (var, path, _at_validtime(tc))
-    yield taskname
-    exists = [False]
-    yield Asset(exists, lambda: exists[0])
-    idx = _grib_index_file_eccodes(c, path, tc, source)
-    yield idx
-    idx = ec.codes_index_read(str(idx.ref))
-    for k, v in [
-        (S.shortName, var.name),
-        (S.typeOfLevel, var.level_type),
-        (S.level, int(var.level) if var.level else 0),
-    ]:
-        ec.codes_index_select(idx, k, v)
-    count = 0
-    while gid := ec.codes_new_from_index(idx):
-        count += 1
-        ec.codes_release(gid)
-    if count > 1:
-        logging.warning("Found %d GRIB messages matching %s in index %s.", count, var, path)
-    exists[0] = count > 0
+    # Keep index creation here in-sync with index selection in _grid_grib_from_local.
+    keys = [f"{S.shortName}:s", f"{S.typeOfLevel}:s", f"{S.level}:l"]
+    with _EC_LOCK:
+        iid = ec.codes_index_new_from_file(str(grib_path), keys)
+        logging.debug("%s: Opened %s as %s", taskname, grib_path, iid)
+        with atomic(path) as tmp:
+            ec.codes_index_write(iid, str(tmp))
+        logging.info("%s: Wrote %s", taskname, path)
+        ec.codes_index_release(iid)
+        logging.debug("%s: Released index %s", taskname, iid)
 
 
 @task
 def _grid_grib(c: Config, tc: TimeCoords, var: Var, source: Source):
-    assert source in (Source.BASELINE, Source.TRUTH)
-    template = c.truth.url
-    if source is Source.BASELINE and c.baseline.name != S.truth:
-        template = cast(str, c.baseline.url)
-    url = render(template, tc, context=c.raw)
-    proximity, src = classify_url(url)
+    gridsdir, template = _grid_grib_gridsdir_template(c, source)
+    proximity, url = classify_url(render(template, tc, context=c.raw))
+    if source is Source.FORECAST:
+        assert proximity is Proximity.LOCAL
+    yyyymmdd, hh, leadtime = tcinfo(tc)
+    outdir = gridsdir / yyyymmdd / hh / leadtime
+    path = outdir / f"{var}.grib2"
+    taskname = "%s grid %s" % (source.name.lower().capitalize(), path)
+    yield taskname
+    yield Asset(path, path.is_file)
     if proximity == Proximity.LOCAL:
-        yield "GRIB file %s providing %s grid %s" % (src, var, _at_validtime(tc))
-        exists = [False]
-        yield Asset(src, lambda: exists[0])
-        msg = _grib_message_in_file(c, src, tc, var, source)
-        yield msg
-        exists[0] = msg.ready
+        assert isinstance(url, Path)
+        idxfile = _grib_index_file_eccodes(c, url, tc, source)
+        yield idxfile
+        _grid_grib_from_local(path, idxfile.ref, var, taskname)
     else:
-        yyyymmdd, hh, leadtime = tcinfo(tc)
-        gridsdir = c.paths.grids_truth if source is Source.TRUTH else c.paths.grids_baseline
-        outdir = gridsdir / yyyymmdd / hh / leadtime
-        path = outdir / f"{var}.grib2"
-        taskname = "%s grid %s" % (source.name.lower().capitalize(), path)
-        yield taskname
-        yield Asset(path, path.is_file)
+        assert isinstance(url, str)
         idxdata = _grib_index_data_wgrib2(c, outdir, tc, url=f"{url}.idx")
         yield idxdata
-        var_idx = idxdata.ref[str(var)]
-        fb, lb = var_idx.firstbyte, var_idx.lastbyte
-        headers = {"Range": "bytes=%s" % (f"{fb}-{lb}" if lb else fb)}
-        fetch(taskname, url, path, headers)
+        _grid_grib_from_remote(path, idxdata.ref, var, taskname, url)
 
 
 @task
@@ -611,12 +590,59 @@ def _forecast_grid(
     if data_format is DataFormat.UNKNOWN:
         return _missing(path), data_format
     if data_format == DataFormat.GRIB:
-        return _existing(path), data_format
+        return _grid_grib(c, tc, var, Source.FORECAST), data_format
     # Dataset must therefore be netCDF or Zarr:
     if not c.forecast.coords:
         msg = "Set forecast.coords for dataset %s" % path
         raise WXVXError(msg)
     return _grid_nc(c, varname, tc, var), data_format
+
+
+def _grid_grib_gridsdir_template(c: Config, source: Source) -> tuple[Path, str]:
+    if source is Source.BASELINE and c.baseline.name != S.truth:
+        return c.paths.grids_baseline, cast(str, c.baseline.url)
+    if source is Source.FORECAST:
+        return c.paths.grids_forecast, cast(str, c.forecast.path)
+    # Either source is Source.TRUTH, or source is Source.BASELINE with name 'truth':
+    return c.paths.grids_truth, c.truth.url
+
+
+def _grid_grib_from_local(path: Path, idxfile: Path, var: Var, taskname: str) -> None:
+    # See https://github.com/dtcenter/METplus/discussions/3252 for background on why it's
+    # necessary to extract the grid to a single-message GRIB file instead of pointing MET
+    # at the complete local GRIB file.
+    with _EC_LOCK:
+        iid = ec.codes_index_read(str(idxfile))
+        # Keep index selection here in-sync with index creation in _grib_index_file_eccodes.
+        ec.codes_index_select_string(iid, "shortName", var.name)
+        ec.codes_index_select_string(iid, "typeOfLevel", var.level_type)
+        ec.codes_index_select_long(iid, "level", int(var.level) if var.level else 0)
+        gids = []
+        while gid := ec.codes_new_from_index(iid):
+            gids.append(gid)
+        if gids:
+            if len(gids) > 1:
+                logging.warning(
+                    "%s: %d GRIB messages matched %s in %s", taskname, len(gids), var, idxfile
+                )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with atomic(path) as tmp, tmp.open("wb") as f:
+                ec.codes_write(gids[0], f)
+            logging.debug("%s: Wrote gid %s to %s", taskname, gids[0], path)
+            for gid in gids:
+                ec.codes_release(gid)
+                logging.debug("%s: Released gid %s", taskname, gid)
+        else:
+            logging.warning("%s: No GRIB message matched %s in %s", taskname, var, idxfile)
+        ec.codes_index_release(iid)
+        logging.debug("%s: Released index %s", taskname, iid)
+
+
+def _grid_grib_from_remote(path: Path, idxdata: dict, var: Var, taskname: str, url: str) -> None:
+    var_idx = idxdata[str(var)]
+    fb, lb = var_idx.firstbyte, var_idx.lastbyte
+    headers = {"Range": "bytes=%s" % (f"{fb}-{lb}" if lb else fb)}
+    fetch(taskname, url, path, headers)
 
 
 def _meta(c: Config, varname: str) -> VarMeta:
