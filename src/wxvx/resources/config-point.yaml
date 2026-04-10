@@ -37,11 +37,11 @@ variables:
   10m_u_component_of_wind:
     level_type: heightAboveGround
     levels: [10]
-    name: u10
+    name: 10u
   10m_v_component_of_wind:
     level_type: heightAboveGround
     levels: [10]
-    name: v10
+    name: 10v
   2m_temperature:
     level_type: heightAboveGround
     levels: [2]
