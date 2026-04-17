@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -11,15 +12,50 @@ import numpy as np
 import xarray as xr
 from pyproj import Proj
 
+from wxvx.config import Coords
 from wxvx.strings import EC, MET, NOAA, S
-from wxvx.types import Coords, VarMeta
-from wxvx.util import WXVXError, render
+from wxvx.util import LINETYPE, WXVXError, render
 
 if TYPE_CHECKING:
+    from wxvx.config import Config
     from wxvx.times import TimeCoords
-    from wxvx.types import Config
 
 # Public
+
+
+@dataclass(frozen=True)
+class VarMeta:
+    cf_standard_name: str
+    description: str
+    level_type: str
+    met_stats: list[str]
+    name: str
+    units: str
+    # Optional:
+    cat_thresh: list[str] | None = None
+    cnt_thresh: list[str] | None = None
+    nbrhd_shape: str | None = None
+    nbrhd_width: list[int] | None = None
+
+    def __post_init__(self):
+        assert self.cf_standard_name
+        assert self.description
+        assert self.level_type in (S.atmosphere, S.heightAboveGround, S.isobaricInhPa, S.surface)
+        assert self.met_stats
+        assert self.name
+        assert self.units
+        assert all(x in LINETYPE for x in self.met_stats)
+        for k, v in vars(self).items():
+            match k:
+                case MET.cat_thresh:
+                    assert v is None or (v and all(isinstance(x, str) for x in v))
+                case MET.cnt_thresh:
+                    assert v is None or (v and all(isinstance(x, str) for x in v))
+                case MET.nbrhd_shape:
+                    assert v is None or v in (MET.CIRCLE, MET.SQUARE)
+                case MET.nbrhd_width:
+                    assert v is None or (v and all(isinstance(x, int) for x in v))
+
 
 UNKNOWN = "unknown"
 
@@ -291,10 +327,10 @@ def da_select(c: Config, ds: xr.Dataset, varname: str, tc: TimeCoords, var: Var)
         if key_inittime in coords:
             da = _narrow(da, key_inittime, dt(tc.cycle))
         key_leadtime = c.forecast.coords.time.leadtime
-        if key_leadtime in coords:
+        if key_leadtime is not None and key_leadtime in coords:
             da = _narrow(da, key_leadtime, np.timedelta64(int(tc.leadtime.total_seconds()), "s"))
         key_validtime = c.forecast.coords.time.validtime
-        if key_validtime in coords:
+        if key_validtime is not None and key_validtime in coords:
             da = _narrow(da, key_validtime, dt(tc.validtime))
         key_level = c.forecast.coords.level
         if key_level in coords and var.level is not None:
@@ -423,7 +459,7 @@ def _da_to_latitude(da: xr.DataArray, dims: list[str]) -> xr.DataArray:
     )
 
 
-def _da_to_longitude(da: xr.DataArray, dims=list[str]) -> xr.DataArray:
+def _da_to_longitude(da: xr.DataArray, dims: list[str]) -> xr.DataArray:
     var = da.longitude
     return xr.DataArray(
         data=var.values,

@@ -4,57 +4,19 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum, auto
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Protocol, cast
-
-from uwtools.api.config import YAMLConfig, validate
+from typing import Any, cast
 
 from wxvx.strings import MET, S
-from wxvx.util import (
-    LINETYPE,
-    DataFormat,
-    WXVXError,
-    expand,
-    resource_path,
-    to_datetime,
-    to_timedelta,
-)
+from wxvx.util import DataFormat, ToGridVal, TruthType, WXVXError, expand, to_datetime, to_timedelta
 
-_TRUTH_NAMES_GRID = (S.GFS, S.HRRR)
+_TRUTH_NAMES_GRID = (S.GDAS, S.GFS, S.HRRR)
 _TRUTH_NAMES_POINT = (S.PREPBUFR,)
 _TRUTH_NAMES = tuple(sorted([*_TRUTH_NAMES_GRID, *_TRUTH_NAMES_POINT]))
 
 _DatetimeT = str | datetime
 _TimedeltaT = str | int
-
-
-class Named(Protocol):
-    name: str
-
-
-class Source(Enum):
-    BASELINE = auto()
-    FORECAST = auto()
-    TRUTH = auto()
-
-
-class ToGridVal(Enum):
-    FCST = auto()
-    OBS = auto()
-
-
-class TruthType(Enum):
-    GRID = auto()
-    POINT = auto()
-
-
-def validated_config(yc: YAMLConfig) -> Config:
-    if not validate(schema_file=resource_path("config.jsonschema"), config_data=yc.data):
-        msg = "Config failed schema validation"
-        raise WXVXError(msg)
-    return Config(yc.data)
 
 
 # Below, assert statements relate to config requirements that should have been enforced by a prior
@@ -407,40 +369,6 @@ class Truth:
                 "When truth.type is '%s' set truth.name to: %s"
                 % (self.type.name.lower(), ", ".join(_TRUTH_NAMES_POINT))
             )
-
-
-@dataclass(frozen=True)
-class VarMeta:
-    cf_standard_name: str
-    description: str
-    level_type: str
-    met_stats: list[str]
-    name: str
-    units: str
-    # Optional:
-    cat_thresh: list[str] | None = None
-    cnt_thresh: list[str] | None = None
-    nbrhd_shape: str | None = None
-    nbrhd_width: list[int] | None = None
-
-    def __post_init__(self):
-        assert self.cf_standard_name
-        assert self.description
-        assert self.level_type in (S.atmosphere, S.heightAboveGround, S.isobaricInhPa, S.surface)
-        assert self.met_stats
-        assert self.name
-        assert self.units
-        assert all(x in LINETYPE for x in self.met_stats)
-        for k, v in vars(self).items():
-            match k:
-                case MET.cat_thresh:
-                    assert v is None or (v and all(isinstance(x, str) for x in v))
-                case MET.cnt_thresh:
-                    assert v is None or (v and all(isinstance(x, str) for x in v))
-                case MET.nbrhd_shape:
-                    assert v is None or v in (MET.CIRCLE, MET.SQUARE)
-                case MET.nbrhd_width:
-                    assert v is None or (v and all(isinstance(x, int) for x in v))
 
 
 # Helpers

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 import re
+from enum import Enum, auto
 from functools import cache
 from itertools import chain, pairwise, product
 from pathlib import Path
 from stat import S_IEXEC
 from textwrap import dedent
 from threading import Lock
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import urlparse
 from warnings import catch_warnings, simplefilter
 
@@ -23,15 +24,16 @@ import xarray as xr
 from iotaa import Asset, Node, collection, external, task
 
 from wxvx import variables
+from wxvx.config import Cycles
 from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
 from wxvx.strings import MET, S
 from wxvx.times import TimeCoords, gen_timecoords, gen_timecoords_truth, hh, tcinfo, yyyymmdd
-from wxvx.types import Cycles, Named, Source, TruthType
 from wxvx.util import (
     LINETYPE,
     DataFormat,
     Proximity,
+    TruthType,
     WXVXError,
     atomic,
     classify_data_format,
@@ -46,10 +48,22 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from datetime import datetime
 
-    from wxvx.types import Config, VarMeta
+    from wxvx.config import Config
+    from wxvx.variables import VarMeta
 
 _EC_LOCK = Lock()
 _PLOT_LOCK = Lock()
+
+
+class Named(Protocol):
+    name: str
+
+
+class Source(Enum):
+    BASELINE = auto()
+    FORECAST = auto()
+    TRUTH = auto()
+
 
 # Public tasks
 
