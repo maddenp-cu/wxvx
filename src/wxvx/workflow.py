@@ -190,10 +190,7 @@ def _config_grid_stat(
     meta = _meta(c, varname)
     config = {
         MET.fcst: {MET.field: [field_fcst]},
-        MET.mask: {
-            MET.grid: [] if polyfile else [MET.FULL],
-            MET.poly: [polyfile.ref] if polyfile else [],
-        },
+        MET.mask: _met_mask(polyfile),
         MET.model: c.truth.name if source == Source.TRUTH else c.forecast.name,
         MET.nc_pairs_flag: {MET.climo: MET.FALSE, MET.raw: MET.FALSE} if c.ncdiffs else MET.FALSE,
         MET.obs: {MET.field: [field_obs]},
@@ -235,7 +232,14 @@ def _config_pb2nc(c: Config, path: Path):
 
 @task
 def _config_point_stat(
-    c: Config, path: Path, source: Source, varname: str, var: Var, prefix: str, datafmt: DataFormat
+    c: Config,
+    path: Path,
+    source: Source,
+    varname: str,
+    var: Var,
+    prefix: str,
+    datafmt: DataFormat,
+    polyfile: Node | None,
 ):
     taskname = f"Config for point_stat {path}"
     yield taskname
@@ -251,6 +255,7 @@ def _config_point_stat(
             MET.type: {MET.method: MET.BILIN, MET.width: 2},
             MET.vld_thresh: 1.0,
         },
+        MET.mask: _met_mask(polyfile),
         MET.message_type: [MET.SFC if surface else MET.ATM],
         MET.message_type_group_map: {MET.ATM: "ADPUPA,AIRCAR,AIRCFT", MET.SFC: "ADPSFC"},
         MET.model: cast(Named, sections[source]).name,
@@ -494,11 +499,8 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
         datafmt = DataFormat.GRIB
     obs = _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var, Source.TRUTH)
     reqs = [fcst, obs]
-    polyfile = None
-    if mask := c.forecast.mask:
-        polyfile = _polyfile(c.paths.run / S.stats / "mask.poly", mask)
-        reqs.append(polyfile)
     path_config = path.with_suffix(".config")
+    polyfile = _maybe_polyfile(c, reqs)
     config = _config_grid_stat(c, path_config, source, varname, var, prefix, datafmt, polyfile)
     if datafmt != DataFormat.UNKNOWN:
         reqs.append(config)
@@ -537,8 +539,9 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
         fcst = _grid_grib(c, tc, var, Source.BASELINE)
         datafmt = DataFormat.GRIB
     reqs.append(fcst)
+    polyfile = _maybe_polyfile(c, reqs)
     config = _config_point_stat(
-        c, path.with_suffix(".config"), source, varname, var, prefix, datafmt
+        c, path.with_suffix(".config"), source, varname, var, prefix, datafmt, polyfile
     )
     if datafmt != DataFormat.UNKNOWN:
         reqs.append(config)
@@ -657,6 +660,21 @@ def _grid_grib_from_remote(path: Path, idxdata: dict, var: Var, taskname: str, u
     fb, lb = var_idx.firstbyte, var_idx.lastbyte
     headers = {"Range": "bytes=%s" % (f"{fb}-{lb}" if lb else fb)}
     fetch(taskname, url, path, headers)
+
+
+def _maybe_polyfile(c: Config, reqs: list[Node]) -> Node | None:
+    if mask := c.forecast.mask:
+        polyfile = _polyfile(c.paths.run / S.stats / "mask.poly", mask)
+        reqs.append(polyfile)
+        return polyfile
+    return None
+
+
+def _met_mask(polyfile: Node | None) -> dict[str, list[str]]:
+    return {
+        MET.grid: [] if polyfile else [MET.FULL],
+        MET.poly: [polyfile.ref] if polyfile else [],
+    }
 
 
 def _meta(c: Config, varname: str) -> VarMeta:

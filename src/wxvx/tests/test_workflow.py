@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from textwrap import indent
+from textwrap import dedent, indent
 from types import SimpleNamespace as ns
 from typing import cast
 from unittest.mock import ANY, Mock, patch
@@ -18,7 +18,7 @@ from iotaa import Asset, Node, external
 from pytest import fixture, mark, raises
 
 from wxvx import variables, workflow
-from wxvx.config import Config
+from wxvx.config import Config, _force
 from wxvx.strings import EC, MET, NOAA, S
 from wxvx.tests.support import with_del
 from wxvx.times import TimeCoords, gen_timecoords, tcinfo
@@ -246,6 +246,7 @@ def test_workflow__config_point_stat__atm(c, fakefs, fmt, testvars, tidy):
         var=testvars[EC.gh],
         prefix="atm",
         datafmt=fmt,
+        polyfile=Mock(ref=Path("/path/to/mask.poly")),
     )
     expected = """
     fcst = {
@@ -262,6 +263,12 @@ def test_workflow__config_point_stat__atm(c, fakefs, fmt, testvars, tidy):
         width = 2;
       }
       vld_thresh = 1.0;
+    }
+    mask = {
+      grid = [];
+      poly = [
+        "/path/to/mask.poly"
+      ];
     }
     message_type = [
       "ATM"
@@ -319,6 +326,7 @@ def test_workflow__config_point_stat__sfc(c, fakefs, fmt, testvars, tidy):
         var=testvars[EC.t2],
         prefix="sfc",
         datafmt=fmt,
+        polyfile=None,
     )
     expected = """
     fcst = {
@@ -335,6 +343,12 @@ def test_workflow__config_point_stat__sfc(c, fakefs, fmt, testvars, tidy):
         width = 2;
       }
       vld_thresh = 1.0;
+    }
+    mask = {
+      grid = [
+        "FULL"
+      ];
+      poly = [];
     }
     message_type = [
       "SFC"
@@ -391,6 +405,7 @@ def test_workflow__config_point_stat__unsupported_regrid_method(c, fakefs, testv
         var=testvars[EC.gh],
         prefix="atm",
         datafmt=DataFormat.NETCDF,
+        polyfile=None,
     )
     assert not task.ready
     assert not path.is_file()
@@ -661,8 +676,9 @@ def test_workflow__stats_vs_grid(c, datafmt, fakefs, mask, source, tc, testvars)
 
 
 @mark.parametrize("datafmt", [DataFormat.NETCDF, DataFormat.ZARR, DataFormat.UNKNOWN])
+@mark.parametrize("mask", [True, False])
 @mark.parametrize("source", [Source.BASELINE, Source.FORECAST])
-def test_workflow__stats_vs_obs(c, datafmt, fakefs, source, tc, testvars):
+def test_workflow__stats_vs_obs(c, datafmt, fakefs, mask, source, tc, testvars):
     @external
     def mock(*_args, **_kwargs):
         yield "mock"
@@ -673,6 +689,8 @@ def test_workflow__stats_vs_obs(c, datafmt, fakefs, source, tc, testvars):
     rundir = fakefs / S.run / S.stats / "19700101" / "00" / "000"
     var = testvars[EC.t2]
     taskname = "Stats vs obs for %s %s at 19700101 00Z 000" % (source.name.lower(), var)
+    if not mask:
+        c.forecast._mask = None
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=var, prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
         stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref
@@ -848,6 +866,47 @@ def test_workflow__grid_grib_from_remote(testvars):
             kwargs = dict(path=path, idxdata=idxdata, var=testvars[key], taskname=taskname, url=url)
             workflow._grid_grib_from_remote(**kwargs)
             fetch.assert_called_with(taskname, url, path, {"Range": f"bytes={byterange}"})
+
+
+def test_workflow__maybe_polyfile__mask(c, fakefs):
+    _force(c.paths, "run", fakefs)
+    c.forecast._mask = [[1, 1], [2, 2], [3, 3]]
+    path = fakefs / "stats" / "mask.poly"
+    reqs: list = []
+    assert not path.exists()
+    polyfile = workflow._maybe_polyfile(c=c, reqs=reqs)
+    assert isinstance(polyfile, Node)
+    assert polyfile.ref == path
+    expected = """
+    MASK
+    1 1
+    2 2
+    3 3
+    """
+    assert path.read_text().strip() == dedent(expected).strip()
+
+
+def test_workflow__maybe_polyfile__no_mask(c, fakefs):
+    _force(c.paths, "run", fakefs)
+    c.forecast._mask = None
+    path = fakefs / "stats" / "mask.poly"
+    reqs: list = []
+    polyfile = workflow._maybe_polyfile(c=c, reqs=reqs)
+    assert polyfile is None
+    assert not path.exists()
+
+
+def test_workflow__met_mask__polyfile():
+    path = "/path/to/mask.poly"
+    polyfile = Mock(ref=path)
+    expected = {"grid": [], "poly": [path]}
+    assert workflow._met_mask(polyfile=polyfile) == expected
+
+
+def test_workflow__met_mask__no_polyfile():
+    polyfile = None
+    expected = {"grid": ["FULL"], "poly": []}
+    assert workflow._met_mask(polyfile=polyfile) == expected
 
 
 def test_workflow__meta(c):
