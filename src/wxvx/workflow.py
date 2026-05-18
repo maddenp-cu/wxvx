@@ -220,7 +220,8 @@ def _config_pb2nc(c: Config, path: Path):
     config: dict = {
         MET.mask: {MET.grid: c.regrid.to if re.match(r"^G\d{3}$", str(c.regrid.to)) else ""},
         MET.message_type: ["ADPSFC", "ADPUPA", "AIRCAR", "AIRCFT"],
-        MET.obs_bufr_var: ["POB", "QOB", "TOB", "UOB", "VOB", "ZOB"],
+        MET.obs_bufr_map: {"PMO": "PRMSL"},
+        MET.obs_bufr_var: ["PMO", "POB", "QOB", "TOB", "UOB", "VOB", "ZOB"],
         MET.obs_window: {MET.beg: -1800, MET.end: 1800},
         MET.quality_mark_thresh: 9,
         MET.time_summary: {MET.step: 3600, MET.width: 3600, MET.obs_var: [], MET.type: _type},
@@ -246,7 +247,7 @@ def _config_point_stat(
     yield Asset(path, path.is_file)
     yield None
     field_fcst, field_obs = _config_fields(c, varname, var, datafmt)
-    surface = var.level_type in (S.heightAboveGround, S.surface)
+    surface = var.level_type in (S.heightAboveGround, S.meanSea, S.surface)
     sections = {Source.BASELINE: c.baseline, Source.FORECAST: c.forecast, Source.TRUTH: c.truth}
     config = {
         MET.fcst: {MET.field: [field_fcst]},
@@ -639,9 +640,8 @@ def _grid_grib_from_local(path: Path, idxfile: Path, var: Var, taskname: str) ->
             gids.append(gid)
         if gids:
             if len(gids) > 1:
-                logging.warning(
-                    "%s: %d GRIB messages matched %s in %s", taskname, len(gids), var, idxfile
-                )
+                msg = "%s: %d GRIB messages matched %s in %s"
+                logging.warning(msg, taskname, len(gids), var, idxfile)
             path.parent.mkdir(parents=True, exist_ok=True)
             with atomic(path) as tmp, tmp.open("wb") as f:
                 ec.codes_write(gids[0], f)

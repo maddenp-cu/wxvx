@@ -28,6 +28,7 @@ class _EC(_ValsMatchKeys):
     """
 
     gh: str = _
+    prmsl: str = _
     q: str = _
     refc: str = _
     sp: str = _
@@ -88,6 +89,7 @@ class _MET(_ValsMatchKeys):
     nbrhd_width: str = _
     nc_pairs_flag: str = _
     obs: str = _
+    obs_bufr_map: str = _
     obs_bufr_var: str = _
     obs_var: str = _
     obs_window: str = _
@@ -117,6 +119,7 @@ class _NOAA(_ValsMatchKeys):
 
     HGT: str = _
     PRES: str = _
+    PRMSL: str = _
     REFC: str = _
     SPFH: str = _
     T2M: str = _
@@ -167,6 +170,7 @@ class _S(_ValsMatchKeys):
     levels: str = _
     longitude: str = _
     mask: str = _
+    meanSea: str = _
     method: str = _
     name: str = _
     ncdiffs: str = _
