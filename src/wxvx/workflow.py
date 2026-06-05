@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from enum import Enum, auto
 from functools import cache
@@ -476,7 +477,7 @@ def _plot(
 
 
 @task
-def _polyfile(path: Path, mask: tuple[tuple[float, float]]):
+def _polyfile_from_lat_lon_pairs(path: Path, mask: tuple[tuple[float, float]]):
     taskname = "Poly file %s" % path
     yield taskname
     yield Asset(path, path.is_file)
@@ -667,8 +668,22 @@ def _grid_grib_from_remote(path: Path, idxdata: dict, var: Var, taskname: str, u
 
 
 def _maybe_polyfile(c: Config, reqs: list[Node]) -> Node | None:
+    polyfile: Node
     if mask := c.forecast.mask:
-        polyfile = _polyfile(c.paths.run / S.stats / "mask.poly", mask)
+        assert isinstance(mask, (list, str))
+        if isinstance(mask, list):
+            polyfile = _polyfile_from_lat_lon_pairs(c.paths.run / S.stats / "mask.poly", mask)
+        else:  # mask is a str
+            path = Path(mask)
+            if not path.is_file():
+                logging.debug("Mask %s not found, checking MET masks", path)
+                metmask = Path(os.environ["MET_DATA"], "poly", mask)
+                if metmask.is_file():
+                    logging.debug("Using MET mask %s", metmask)
+                    path = metmask
+                else:
+                    logging.debug("MET mask %s not found", metmask)
+            polyfile = _existing(path)
         reqs.append(polyfile)
         return polyfile
     return None

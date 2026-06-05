@@ -468,7 +468,7 @@ def test_workflow__grib_index_data_wgrib2(c, tc, tidy):
     }
 
 
-def test_workflow__grib_index_file_eccodes(c, caplog, fakefs, tc):
+def test_workflow__grib_index_file_eccodes(c, fakefs, logged, tc):
     grib = fakefs / "foo"
     grib.touch()
     with patch.object(workflow, "ec") as ec:
@@ -477,7 +477,7 @@ def test_workflow__grib_index_file_eccodes(c, caplog, fakefs, tc):
     assert idxfile.ready
     assert idxfile.ref.is_file()
     for s in ["Opened %s" % grib, "Wrote %s" % idxfile.ref, "Released index"]:
-        assert s in caplog.text
+        assert logged(s)
 
 
 @mark.parametrize("path", ["/path/to/a.grib2", "file:///path/to/a.grib2"])
@@ -634,11 +634,11 @@ def test_workflow__plot(c, dictkey, fakefs, fs):
     xticks.assert_called_once_with(ticks=[0, 6, 12], labels=["000", "006", "012"], rotation=90)
 
 
-def test_workflow__polyfile(fakefs, tidy):
+def test_workflow__polyfile_from_lat_lon_pairs(fakefs, tidy):
     path = fakefs / "a.poly"
     assert not path.is_file()
     mask = ((52.6, 225.9), (52.6, 255.0), (21.1, 255.0), (21.1, 225.9))
-    polyfile = workflow._polyfile(path=path, mask=mask)
+    polyfile = workflow._polyfile_from_lat_lon_pairs(path=path, mask=mask)
     assert polyfile.ready
     expected = """
     MASK
@@ -834,7 +834,7 @@ def test_workflow__grib_grid_gridsdir_template(c, source):
 
 
 @mark.parametrize("gids", [[], [11], [11, 22]])
-def test_workflow__grid_grib_from_local(caplog, fakefs, gids, testvars):
+def test_workflow__grid_grib_from_local(fakefs, gids, logged, testvars):
     path = fakefs / "a.grib2"
     idxfile = fakefs / "a.ecidx"
     var = testvars[EC.t2]
@@ -850,18 +850,18 @@ def test_workflow__grid_grib_from_local(caplog, fakefs, gids, testvars):
     assert (iid, "level", 2) in [x.args for x in ec.codes_index_select_long.call_args_list]
     if gids:
         ec.codes_write.assert_called_once_with(gids[0], ANY)
-        assert "Wrote gid %s to %s" % (gids[0], path) in caplog.text
+        assert logged("Wrote gid %s to %s" % (gids[0], path))
         if len(gids) > 1:
-            assert "%s GRIB messages matched" % len(gids) in caplog.text
+            assert logged("%s GRIB messages matched" % len(gids))
         for gid in gids:
-            assert "Released gid %s" % gid in caplog.text
+            assert logged("Released gid %s" % gid)
     else:
         ec.codex_write.assert_not_called()
         assert "No GRIB message matched %s in %s" % (var, idxfile)
     for expected, actual in zip(gids, ec.codes_release.call_args_list, strict=True):
         assert actual.args == (expected,)
     ec.codes_index_release.assert_called_once_with(iid)
-    assert "Released index %s" % iid in caplog.text
+    assert logged("Released index %s" % iid)
 
 
 def test_workflow__grid_grib_from_remote(testvars):
@@ -899,6 +899,48 @@ def test_workflow__maybe_polyfile__mask(c, fakefs):
     3 3
     """
     assert path.read_text().strip() == dedent(expected).strip()
+
+
+def test_workflow__maybe_polyfile__mask_str(c, fakefs):
+    _force(c.paths, "run", fakefs)
+    path = fakefs / "mask.poly"
+    path.touch()
+    c.forecast._mask = str(path)
+    reqs: list = []
+    polyfile = workflow._maybe_polyfile(c=c, reqs=reqs)
+    assert isinstance(polyfile, Node)
+    assert polyfile.ref == path
+    assert reqs == [polyfile]
+
+
+def test_workflow__maybe_polyfile__mask_str_met(c, fs, logged):
+    d = Path(os.environ["MET_DATA"], "poly")
+    fs.add_real_directory(d)
+    name = "CONUS.poly"
+    c.forecast._mask = name
+    reqs: list = []
+    polyfile = workflow._maybe_polyfile(c=c, reqs=reqs)
+    path = d / name
+    assert isinstance(polyfile, Node)
+    assert polyfile.ref == path
+    assert reqs == [polyfile]
+    assert logged("Mask %s not found, checking MET masks" % name)
+    assert logged("Using MET mask %s" % path)
+
+
+def test_workflow__maybe_polyfile__mask_str_met_missing(c, fs, logged):
+    d = Path(os.environ["MET_DATA"], "poly")
+    fs.add_real_directory(d)
+    name = "MISSING.poly"
+    c.forecast._mask = name
+    reqs: list = []
+    polyfile = workflow._maybe_polyfile(c=c, reqs=reqs)
+    path = d / name
+    assert isinstance(polyfile, Node)
+    assert polyfile.ref == Path(name)
+    assert reqs == [polyfile]
+    assert logged("Mask %s not found, checking MET masks" % name)
+    assert logged("MET mask %s not found" % path)
 
 
 def test_workflow__maybe_polyfile__no_mask(c, fakefs):
