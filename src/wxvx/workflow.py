@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sqlite3
 from enum import Enum, auto
 from functools import cache
 from itertools import chain, pairwise, product
@@ -41,6 +42,7 @@ from wxvx.util import (
     classify_url,
     mpexec,
     render,
+    resource,
     version,
 )
 from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, metlevel
@@ -278,6 +280,58 @@ def _config_point_stat(
     }
     with atomic(path) as tmp:
         tmp.write_text("%s\n" % render_metconf(config))
+
+
+@task
+def _dbfile(p: str):
+    path = Path(p)
+    yield "Database %s" % path
+    yield Asset(path, path.is_file)
+    yield None
+    _integer_columns = {
+        "FRANK_TIES",
+        "INTERP_PNTS",
+        "ORANK_TIES",
+        "RANKS",
+        "TOTAL",
+    }
+    _text_columns = {
+        "COV_THRESH",
+        "DESC",
+        "FCST_LEAD",
+        "FCST_LEV",
+        "FCST_THRESH",
+        "FCST_UNITS",
+        "FCST_VALID_BEG",
+        "FCST_VALID_END",
+        "FCST_VAR",
+        "INTERP_MTHD",
+        "LINE_TYPE",
+        "MODEL",
+        "OBS_LEAD",
+        "OBS_LEV",
+        "OBS_THRESH",
+        "OBS_UNITS",
+        "OBS_VALID_BEG",
+        "OBS_VALID_END",
+        "OBS_VAR",
+        "OBTYPE",
+        "VERSION",
+        "VX_MASK",
+    }
+    columns = resource("columns.cnt").split()
+    col_defs = ", ".join(
+        "%s %s"
+        % (
+            col,
+            "INTEGER" if col in _integer_columns else "TEXT" if col in _text_columns else "REAL",
+        )
+        for col in columns
+    )
+    with atomic(path) as tmp:
+        con = sqlite3.connect(tmp)
+        con.execute("CREATE TABLE stats (id INTEGER PRIMARY KEY AUTOINCREMENT, %s)" % col_defs)
+        con.close()
 
 
 @external
