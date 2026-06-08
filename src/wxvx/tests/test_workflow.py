@@ -670,7 +670,7 @@ def test_workflow__stats_vs_grid(c, datafmt, fakefs, mask, source, tc, testvars)
     )
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=testvars[EC.t2], prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = taskfunc(**kwargs, dry_run=True).ref
+        stat = taskfunc(**kwargs, dry_run=True).ref["path"]
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
@@ -708,7 +708,7 @@ def test_workflow__stats_vs_obs(c, datafmt, fakefs, mask, source, tc, testvars):
         c.forecast._mask = None
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=var, prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref
+        stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref["path"]
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
@@ -975,7 +975,7 @@ def test_workflow__meta(c):
 @mark.parametrize("dictkey", ["foo", "bar", "baz"])
 def test_workflow__prepare_plot_data(dictkey):
     _, _, dfs, stat, width = TESTDATA[dictkey]
-    node = lambda x: Mock(ref=f"{x}.stat", taskname=x)
+    node = lambda x: Mock(ref={"path": f"{x}.stat"}, taskname=x)
     reqs = cast(Sequence[Node], [node("node1"), node("node2")])
     with patch.object(workflow.pd, "read_csv", side_effect=dfs):
         tdf = workflow._prepare_plot_data(reqs=reqs, stat=stat, width=width)

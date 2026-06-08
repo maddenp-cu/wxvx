@@ -595,7 +595,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     template = "grid_stat_%s_%02d0000L_%s_%s0000V.stat"
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
-    yield Asset(path, path.is_file)
+    yield Asset({"path": path, "tc": tc, "var": var, "varname": varname}, path.is_file)
     if source == Source.FORECAST:
         location = Path(render(c.forecast.path, tc, context=c.raw))
         fcst, datafmt = _forecast_grid(location, c, varname, tc, var)
@@ -634,7 +634,7 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
     template = "point_stat_%s_%02d0000L_%s_%s0000V.stat"
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
-    yield Asset(path, path.is_file)
+    yield Asset({"path": path, "tc": tc, "var": var, "varname": varname}, path.is_file)
     obs = _netcdf_from_obs(c, TimeCoords(tc.validtime))
     reqs: list[Node] = [obs]
     if source is Source.FORECAST:
@@ -801,7 +801,7 @@ def _meta(c: Config, varname: str) -> VarMeta:
 
 def _prepare_plot_data(reqs: Sequence[Node], stat: str, width: int | None) -> pd.DataFrame:
     linetype = LINETYPE[stat]
-    files = [str(x.ref).replace(".stat", f"_{linetype}.txt") for x in reqs]
+    files = [str(x.ref["path"]).replace(".stat", f"_{linetype}.txt") for x in reqs]
     columns = [MET.MODEL, MET.FCST_LEAD, stat]
     if linetype in [MET.cts, MET.nbrcnt]:
         columns.append(MET.FCST_THRESH)
