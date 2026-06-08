@@ -284,11 +284,13 @@ def _config_point_stat(
 
 @collection
 def dbrows(c: Config):
-    taskname = "Database rows" # for %s vs %s" % (c.forecast.name, c.truth.name)
+    taskname = "Database rows"  # for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
-    # for varname, level in _varnames_levels(c):
-    #     reqs.extend(_stat_reqs(c, varname, level))
-    yield [_dbrow(c, stat_req) for varname, level in _varnames_levels(c) for stat_req in _stat_reqs(c, varname, level)]
+    yield [
+        _dbrow(c, stat_req)
+        for varname, level in _varnames_levels(c)
+        for stat_req in _stat_reqs(c, varname, level)
+    ]
 
 
 @task
@@ -307,14 +309,18 @@ def _dbrow(c: Config, stat_req: Node):
     leadtime_ = int(leadtime.total_seconds() // 3600 * 10000)
     fcst_valid_beg = (cycle + leadtime).strftime("%Y%m%d_%H0000")
     varname = foo["varname"]
-    stmt = "select 1 from stats where FCST_VAR = '%s' and FCST_LEV = '%s' and FCST_LEAD = %s and FCST_VALID_BEG = '%s'" % (varname, level_, leadtime_, fcst_valid_beg)
+    stmt = (
+        "select 1 from stats where FCST_VAR = '%s' and FCST_LEV = '%s' and FCST_LEAD = %s and FCST_VALID_BEG = '%s'"
+        % (varname, level_, leadtime_, fcst_valid_beg)
+    )
     yield Asset(None, lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0]).empty)
     reqs = [dbcon, stat_req]
     yield reqs
     txtfile = str(foo["path"]).replace(".stat", "_cnt.txt")
     df = pd.read_csv(txtfile, sep=r"\s+")
-    df = df.drop(columns=['SI_BCL.1'])
+    df = df.drop(columns=["SI_BCL.1"])
     df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
+
 
 @task
 def _dbcon(p: str):
