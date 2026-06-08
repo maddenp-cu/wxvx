@@ -282,6 +282,56 @@ def _config_point_stat(
         tmp.write_text("%s\n" % render_metconf(config))
 
 
+# @task
+# def foo(p: str):
+#     yield "foo"
+#     yield Asset(None, lambda: False)
+#     dbcon = _dbcon(p)
+#     yield dbcon
+#     breakpoint()
+#     pass
+
+@collection
+def dbrows(c: Config):
+    taskname = "Database rows" # for %s vs %s" % (c.forecast.name, c.truth.name)
+    yield taskname
+    yield [
+        _dbrow(c, cycle, leadtime, varname, level)
+        for cycle in c.cycles.values  # noqa: PD011
+        for leadtime in c.leadtimes.values
+        for varname, level in _varnames_levels(c)
+    ]
+
+
+@task
+def _dbrow(
+    c: Config, cycle: datetime, leadtime: timedelta, varname: str, level: float | None
+):
+    meta = _meta(c, varname)
+    var = _var(c, varname, level)
+    desc = meta.description.format(level=var.level)
+    cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
+    taskname = f"Database row {desc} at {cyclestr} {leadtime}"
+    yield taskname
+    yield Asset(None, lambda: False)
+    dbcon = _dbcon("/home/maddenp/git/wxvx/my.db")
+    stats = _stat_reqs(c, varname, level, cycle)
+    reqs = [dbcon, *stats]
+    yield reqs
+    txtfile = str(stats[0].ref).replace(".stat", "_cnt.txt")
+    df = pd.read_csv(txtfile, sep=r"\s+")
+    df.to_sql(name="stats", con=dbcon.ref[0], if_exists="replace", index=False)
+
+@task
+def _dbcon(p: str):
+    yield "Database connection"
+    ref = []
+    yield Asset(ref, lambda: ref)
+    dbfile = _dbfile(p)
+    yield dbfile
+    ref.append(sqlite3.connect(dbfile.ref))
+
+
 @task
 def _dbfile(p: str):
     path = Path(p)
