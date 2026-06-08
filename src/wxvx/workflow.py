@@ -282,15 +282,6 @@ def _config_point_stat(
         tmp.write_text("%s\n" % render_metconf(config))
 
 
-# @task
-# def foo(p: str):
-#     yield "foo"
-#     yield Asset(None, lambda: False)
-#     dbcon = _dbcon(p)
-#     yield dbcon
-#     breakpoint()
-#     pass
-
 @collection
 def dbrows(c: Config):
     taskname = "Database rows" # for %s vs %s" % (c.forecast.name, c.truth.name)
@@ -313,8 +304,12 @@ def _dbrow(
     cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
     taskname = f"Database row {desc} at {cyclestr} {leadtime}"
     yield taskname
-    yield Asset(None, lambda: False)
     dbcon = _dbcon("/home/maddenp/git/wxvx/my.db")
+    level_ = "Z002"
+    leadtime_ = int(leadtime.total_seconds() // 3600 * 10000)
+    fcst_valid_beg = (cycle + leadtime).strftime("%Y%m%d_%H0000")
+    stmt = "select * from stats where FCST_VAR = '%s' and FCST_LEV = '%s' and FCST_LEAD = %s and FCST_VALID_BEG = '%s'" % (varname, level_, leadtime_, fcst_valid_beg)
+    yield Asset(None, lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0]).empty)
     stats = _stat_reqs(c, varname, level, cycle)
     reqs = [dbcon, *stats]
     yield reqs
