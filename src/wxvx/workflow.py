@@ -303,37 +303,43 @@ def _dbrow(c: Config, stat_req: Node):
     cyclestr = f"{yyyymmdd(statmeta.tc.cycle)} {hh(statmeta.tc.cycle)}Z"
     taskname = f"Database row {desc} at {cyclestr} {statmeta.tc.leadtime}"
     yield taskname
-    dbcon = _dbcon(c.paths.run / "wxvx.db")
-    level = "Z002"
-    leadtime = int(statmeta.tc.leadtime.total_seconds() // 3600 * 10000)
-    fcst_valid_beg = (statmeta.tc.cycle + statmeta.tc.leadtime).strftime("%Y%m%d_%H0000")
     stmt = (
         "select 1 from stats where"
-        " FCST_VAR = ?"
-        " and FCST_LEAD = ?"
-        " and FCST_LEV = ?"
-        " and FCST_VALID_BEG = ?"
+        " cycle = ?"
+        " and leadtime = ?"
+        " and level = ?"
+        " and leveltype = ?"
+        " and model = ?"
+        " and varname = ?"
     )
-    params = (statmeta.varname, leadtime, level, fcst_valid_beg)
-    yield Asset(
-        None,
-        lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty,
+    cycle = statmeta.tc.cycle.isoformat()
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    leadtime = (epoch + statmeta.tc.leadtime).strftime("%H:%M:%S")
+    model = cast(str, (c.forecast if statmeta.source is Source.FORECAST else c.baseline).name)
+    dbcon = _dbcon(c.paths.run / "wxvx.db")
+    params = (
+        cycle,
+        leadtime,
+        statmeta.var.level,
+        statmeta.var.level_type,
+        model,
+        statmeta.var.name,
     )
-    reqs = [dbcon, stat_req]
-    yield reqs
+    ready = lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty
+    yield Asset(None, ready)
+    yield [dbcon, stat_req]
     txtfile = str(statmeta.path).replace(".stat", "_cnt.txt")
     df = pd.read_csv(txtfile, sep=r"\s+")
     df = df.drop(columns=["SI_BCL.1"])
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    custom = {
-        "cycle": statmeta.tc.cycle.isoformat(),
-        "leadtime": (epoch + statmeta.tc.leadtime).strftime("%H:%M:%S"),
+    custom_fields = {
+        "cycle": cycle,
+        "leadtime": leadtime,
         "level": statmeta.var.level,
         "leveltype": statmeta.var.level_type,
         "validtime": statmeta.tc.validtime,
         "varname": statmeta.var.name,
     }
-    df = df.assign(**custom)
+    df = df.assign(**custom_fields)
     df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
 
 
@@ -580,7 +586,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     template = "grid_stat_%s_%02d0000L_%s_%s0000V.stat"
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
-    yield Asset(ns(path=path, tc=tc, var=var, varname=varname), path.is_file)
+    yield Asset(ns(path=path, source=source, tc=tc, var=var, varname=varname), path.is_file)
     if source == Source.FORECAST:
         location = Path(render(c.forecast.path, tc, context=c.raw))
         fcst, datafmt = _forecast_grid(location, c, varname, tc, var)
@@ -619,7 +625,7 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
     template = "point_stat_%s_%02d0000L_%s_%s0000V.stat"
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
-    yield Asset({"path": path, "tc": tc, "var": var, "varname": varname}, path.is_file)
+    yield Asset(ns(path=path, source=source, tc=tc, var=var, varname=varname), path.is_file)
     obs = _netcdf_from_obs(c, TimeCoords(tc.validtime))
     reqs: list[Node] = [obs]
     if source is Source.FORECAST:

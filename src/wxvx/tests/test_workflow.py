@@ -708,7 +708,7 @@ def test_workflow__stats_vs_obs(c, datafmt, fakefs, mask, source, tc, testvars):
         c.forecast._mask = None
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=var, prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref["path"]
+        stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref.path
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
