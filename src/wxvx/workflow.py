@@ -74,6 +74,17 @@ class Source(Enum):
 
 
 @collection
+def dbrows(c: Config):
+    taskname = "Database rows"
+    yield taskname
+    yield [
+        _dbrow(c, stat_req)
+        for varname, level in _varnames_levels(c)
+        for stat_req in _stat_reqs(c, varname, level)
+    ]
+
+
+@collection
 def grids(c: Config):
     yield "Grids"
     reqs = [grids_forecast(c)]
@@ -284,15 +295,31 @@ def _config_point_stat(
         tmp.write_text("%s\n" % render_metconf(config))
 
 
-@collection
-def dbrows(c: Config):
-    taskname = "Database rows"  # for %s vs %s" % (c.forecast.name, c.truth.name)
-    yield taskname
-    yield [
-        _dbrow(c, stat_req)
-        for varname, level in _varnames_levels(c)
-        for stat_req in _stat_reqs(c, varname, level)
-    ]
+@task
+def _dbcon(p: str):
+    yield "Database connection"
+    ref: list[sqlite3.Connection] = []
+    yield Asset(ref, lambda: bool(ref))
+    dbfile = _dbfile(p)
+    yield dbfile
+    assert sqlite3.threadsafety == 3
+    ref.append(sqlite3.connect(dbfile.ref))
+
+
+@task
+def _dbfile(p: str):
+    path = Path(p)
+    yield "Database %s" % path
+    yield Asset(path, path.is_file)
+    yield None
+    colmaps = json.loads(resource("columns.json"))
+    colinfo = {**colmaps["wxvx"], **colmaps["met"]}
+    colstr = ", ".join(f"{k} {v}" for k, v in colinfo.items())
+    stmt = "create table stats (id integer primary key autoincrement, %s)"
+    with atomic(path) as tmp:
+        con = sqlite3.connect(tmp)
+        con.execute(stmt % colstr)
+        con.close()
 
 
 @task
@@ -340,33 +367,6 @@ def _dbrow(c: Config, stat_req: Node):
     }
     df = df.assign(**custom_fields)
     df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
-
-
-@task
-def _dbcon(p: str):
-    yield "Database connection"
-    ref: list[sqlite3.Connection] = []
-    yield Asset(ref, lambda: bool(ref))
-    dbfile = _dbfile(p)
-    yield dbfile
-    assert sqlite3.threadsafety == 3
-    ref.append(sqlite3.connect(dbfile.ref))
-
-
-@task
-def _dbfile(p: str):
-    path = Path(p)
-    yield "Database %s" % path
-    yield Asset(path, path.is_file)
-    yield None
-    colmaps = json.loads(resource("columns.json"))
-    colinfo = {**colmaps["wxvx"], **colmaps["met"]}
-    colstr = ", ".join(f"{k} {v}" for k, v in colinfo.items())
-    stmt = "create table stats (id integer primary key autoincrement, %s)"
-    with atomic(path) as tmp:
-        con = sqlite3.connect(tmp)
-        con.execute(stmt % colstr)
-        con.close()
 
 
 @external
