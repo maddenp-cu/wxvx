@@ -297,20 +297,16 @@ def dbrows(c: Config):
 
 @task
 def _dbrow(c: Config, stat_req: Node):
-    foo = stat_req.ref
-    meta = _meta(c, foo.varname)
-    var = foo.var
-    desc = meta.description.format(level=var.level)
-    cycle = foo.tc.cycle
-    leadtime = foo.tc.leadtime
-    cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
-    taskname = f"Database row {desc} at {cyclestr} {leadtime}"
+    statmeta = stat_req.ref
+    varmeta = _meta(c, statmeta.varname)
+    desc = varmeta.description.format(level=statmeta.var.level)
+    cyclestr = f"{yyyymmdd(statmeta.tc.cycle)} {hh(statmeta.tc.cycle)}Z"
+    taskname = f"Database row {desc} at {cyclestr} {statmeta.tc.leadtime}"
     yield taskname
     dbcon = _dbcon(c.paths.run / "wxvx.db")
-    level_ = "Z002"
-    leadtime_ = int(leadtime.total_seconds() // 3600 * 10000)
-    fcst_valid_beg = (cycle + leadtime).strftime("%Y%m%d_%H0000")
-    varname = foo.varname
+    level = "Z002"
+    leadtime = int(statmeta.tc.leadtime.total_seconds() // 3600 * 10000)
+    fcst_valid_beg = (statmeta.tc.cycle + statmeta.tc.leadtime).strftime("%Y%m%d_%H0000")
     stmt = (
         "select 1 from stats where"
         " FCST_VAR = ?"
@@ -318,19 +314,14 @@ def _dbrow(c: Config, stat_req: Node):
         " and FCST_LEV = ?"
         " and FCST_VALID_BEG = ?"
     )
-    params = (
-        varname,
-        leadtime_,
-        level_,
-        fcst_valid_beg,
-    )
+    params = (statmeta.varname, leadtime, level, fcst_valid_beg)
     yield Asset(
         None,
         lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty,
     )
     reqs = [dbcon, stat_req]
     yield reqs
-    txtfile = str(foo.path).replace(".stat", "_cnt.txt")
+    txtfile = str(statmeta.path).replace(".stat", "_cnt.txt")
     df = pd.read_csv(txtfile, sep=r"\s+")
     df = df.drop(columns=["SI_BCL.1"])
     df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
