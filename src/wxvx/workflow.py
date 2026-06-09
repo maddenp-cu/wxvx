@@ -296,19 +296,18 @@ def _config_point_stat(
 
 
 @task
-def _dbcon(p: str):
+def _dbcon(path: Path):
     yield "Database connection"
     ref: list[sqlite3.Connection] = []
     yield Asset(ref, lambda: bool(ref))
-    dbfile = _dbfile(p)
+    dbfile = _dbfile(path)
     yield dbfile
     assert sqlite3.threadsafety == 3
     ref.append(sqlite3.connect(dbfile.ref))
 
 
 @task
-def _dbfile(p: str):
-    path = Path(p)
+def _dbfile(path: Path):
     yield "Database %s" % path
     yield Asset(path, path.is_file)
     yield None
