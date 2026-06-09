@@ -304,26 +304,27 @@ def _dbrow(c: Config, stat_req: Node):
     cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
     taskname = f"Database row {desc} at {cyclestr} {leadtime}"
     yield taskname
-    dbcon = _dbcon("/home/maddenp/git/wxvx/my.db")
+    dbcon = _dbcon("/work/eagle-grid/my.db")
     level_ = "Z002"
     leadtime_ = int(leadtime.total_seconds() // 3600 * 10000)
     fcst_valid_beg = (cycle + leadtime).strftime("%Y%m%d_%H0000")
     varname = foo["varname"]
     stmt = (
         "select 1 from stats where"
-        " FCST_VAR = '%s'"
-        " and FCST_LEAD = %s"
-        " and FCST_LEV = '%s'"
-        " and FCST_VALID_BEG = '%s'"
+        " FCST_VAR = ?"
+        " and FCST_LEAD = ?"
+        " and FCST_LEV = ?"
+        " and FCST_VALID_BEG = ?"
+    )
+    params = (
+        varname,
+        leadtime_,
+        level_,
+        fcst_valid_beg,
     )
     yield Asset(
         None,
-        lambda: (
-            dbcon.ready
-            and not pd.read_sql(
-                sql=stmt, con=dbcon.ref[0], params=(varname, level_, leadtime_, fcst_valid_beg)
-            ).empty
-        ),
+        lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty,
     )
     reqs = [dbcon, stat_req]
     yield reqs
@@ -340,6 +341,7 @@ def _dbcon(p: str):
     yield Asset(ref, lambda: bool(ref))
     dbfile = _dbfile(p)
     yield dbfile
+    assert sqlite3.threadsafety == 3
     ref.append(sqlite3.connect(dbfile.ref))
 
 
