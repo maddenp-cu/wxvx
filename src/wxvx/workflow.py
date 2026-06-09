@@ -297,7 +297,7 @@ def _config_point_stat(
 
 @task
 def _dbcon(path: Path):
-    yield "Database connection"
+    yield "Database connection to %s" % path
     ref: list[sqlite3.Connection] = []
     yield Asset(ref, lambda: bool(ref))
     dbfile = _dbfile(path)
@@ -308,7 +308,7 @@ def _dbcon(path: Path):
 
 @task
 def _dbfile(path: Path):
-    yield "Database %s" % path
+    yield "Database file %s" % path
     yield Asset(path, path.is_file)
     yield None
     colmaps = json.loads(resource("columns.json"))
@@ -324,9 +324,10 @@ def _dbfile(path: Path):
 @task
 def _dbrow(c: Config, stat_req: Node):
     meta = stat_req.ref
-    desc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
+    vardesc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
     cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
-    taskname = f"Database row {desc} at {cyclestr} {meta.tc.leadtime}"
+    model = cast(str, (c.forecast if meta.source is Source.FORECAST else c.baseline).name)
+    taskname = f"Database row {model} {vardesc} {cyclestr}"
     yield taskname
     stmt = (
         "select 1 from stats where"
@@ -340,7 +341,6 @@ def _dbrow(c: Config, stat_req: Node):
     cycle = meta.tc.cycle.isoformat()
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     leadtime = (epoch + meta.tc.leadtime).strftime("%H:%M:%S")
-    model = cast(str, (c.forecast if meta.source is Source.FORECAST else c.baseline).name)
     params = (
         cycle,
         leadtime,
