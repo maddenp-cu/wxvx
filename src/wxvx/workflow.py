@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -351,49 +352,11 @@ def _dbfile(p: str):
     yield "Database %s" % path
     yield Asset(path, path.is_file)
     yield None
-    _integer_columns = {
-        "FRANK_TIES",
-        "INTERP_PNTS",
-        "ORANK_TIES",
-        "RANKS",
-        "TOTAL",
-    }
-    _text_columns = {
-        "COV_THRESH",
-        "DESC",
-        "FCST_LEAD",
-        "FCST_LEV",
-        "FCST_THRESH",
-        "FCST_UNITS",
-        "FCST_VALID_BEG",
-        "FCST_VALID_END",
-        "FCST_VAR",
-        "INTERP_MTHD",
-        "LINE_TYPE",
-        "MODEL",
-        "OBS_LEAD",
-        "OBS_LEV",
-        "OBS_THRESH",
-        "OBS_UNITS",
-        "OBS_VALID_BEG",
-        "OBS_VALID_END",
-        "OBS_VAR",
-        "OBTYPE",
-        "VERSION",
-        "VX_MASK",
-    }
-    columns = resource("columns.cnt").split()
-    col_defs = ", ".join(
-        "%s %s"
-        % (
-            col,
-            "INTEGER" if col in _integer_columns else "TEXT" if col in _text_columns else "REAL",
-        )
-        for col in columns
-    )
+    colinfo = json.loads(resource("columns.json"))
+    colstr = ", ".join(f"{key} {val}" for key, val in colinfo.items())
     with atomic(path) as tmp:
         con = sqlite3.connect(tmp)
-        con.execute("CREATE TABLE stats (id INTEGER PRIMARY KEY AUTOINCREMENT, %s)" % col_defs)
+        con.execute("create table stats (id integer primary key autoincrement, %s)" % colstr)
         con.close()
 
 
