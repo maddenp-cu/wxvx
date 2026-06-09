@@ -297,10 +297,10 @@ def dbrows(c: Config):
 
 @task
 def _dbrow(c: Config, stat_req: Node):
-    statmeta = stat_req.ref
-    desc = _varmeta(c, statmeta.varname).description.format(level=statmeta.var.level)
-    cyclestr = f"{yyyymmdd(statmeta.tc.cycle)} {hh(statmeta.tc.cycle)}Z"
-    taskname = f"Database row {desc} at {cyclestr} {statmeta.tc.leadtime}"
+    meta = stat_req.ref
+    desc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
+    cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
+    taskname = f"Database row {desc} at {cyclestr} {meta.tc.leadtime}"
     yield taskname
     stmt = (
         "select 1 from stats where"
@@ -311,32 +311,32 @@ def _dbrow(c: Config, stat_req: Node):
         " and model = ?"
         " and varname = ?"
     )
-    cycle = statmeta.tc.cycle.isoformat()
+    cycle = meta.tc.cycle.isoformat()
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    leadtime = (epoch + statmeta.tc.leadtime).strftime("%H:%M:%S")
-    model = cast(str, (c.forecast if statmeta.source is Source.FORECAST else c.baseline).name)
+    leadtime = (epoch + meta.tc.leadtime).strftime("%H:%M:%S")
+    model = cast(str, (c.forecast if meta.source is Source.FORECAST else c.baseline).name)
     dbcon = _dbcon(c.paths.run / "wxvx.db")
     params = (
         cycle,
         leadtime,
-        statmeta.var.level,
-        statmeta.var.level_type,
+        meta.var.level,
+        meta.var.level_type,
         model,
-        statmeta.var.name,
+        meta.var.name,
     )
     ready = lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty
     yield Asset(None, ready)
     yield [dbcon, stat_req]
-    txtfile = str(statmeta.path).replace(".stat", "_cnt.txt")
+    txtfile = str(meta.path).replace(".stat", "_cnt.txt")
     df = pd.read_csv(txtfile, sep=r"\s+")
     df = df.drop(columns=["SI_BCL.1"])
     custom_fields = {
         "cycle": cycle,
         "leadtime": leadtime,
-        "level": statmeta.var.level,
-        "leveltype": statmeta.var.level_type,
-        "validtime": statmeta.tc.validtime,
-        "varname": statmeta.var.name,
+        "level": meta.var.level,
+        "leveltype": meta.var.level_type,
+        "validtime": meta.tc.validtime,
+        "varname": meta.var.name,
     }
     df = df.assign(**custom_fields)
     df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
