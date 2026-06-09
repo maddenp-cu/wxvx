@@ -305,7 +305,7 @@ def _dbrow(c: Config, stat_req: Node):
     cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
     taskname = f"Database row {desc} at {cyclestr} {leadtime}"
     yield taskname
-    dbcon = _dbcon("/work/eagle-grid/my.db")
+    dbcon = _dbcon(c.paths.run / "wxvx.db")
     level_ = "Z002"
     leadtime_ = int(leadtime.total_seconds() // 3600 * 10000)
     fcst_valid_beg = (cycle + leadtime).strftime("%Y%m%d_%H0000")
