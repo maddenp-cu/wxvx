@@ -12,6 +12,7 @@ from pathlib import Path
 from stat import S_IEXEC
 from textwrap import dedent
 from threading import Lock
+from types import SimpleNamespace as ns
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import urlparse
 from warnings import catch_warnings, simplefilter
@@ -297,11 +298,11 @@ def dbrows(c: Config):
 @task
 def _dbrow(c: Config, stat_req: Node):
     foo = stat_req.ref
-    meta = _meta(c, foo["varname"])
-    var = foo["var"]
+    meta = _meta(c, foo.varname)
+    var = foo.var
     desc = meta.description.format(level=var.level)
-    cycle = foo["tc"].cycle
-    leadtime = foo["tc"].leadtime
+    cycle = foo.tc.cycle
+    leadtime = foo.tc.leadtime
     cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
     taskname = f"Database row {desc} at {cyclestr} {leadtime}"
     yield taskname
@@ -309,7 +310,7 @@ def _dbrow(c: Config, stat_req: Node):
     level_ = "Z002"
     leadtime_ = int(leadtime.total_seconds() // 3600 * 10000)
     fcst_valid_beg = (cycle + leadtime).strftime("%Y%m%d_%H0000")
-    varname = foo["varname"]
+    varname = foo.varname
     stmt = (
         "select 1 from stats where"
         " FCST_VAR = ?"
@@ -329,7 +330,7 @@ def _dbrow(c: Config, stat_req: Node):
     )
     reqs = [dbcon, stat_req]
     yield reqs
-    txtfile = str(foo["path"]).replace(".stat", "_cnt.txt")
+    txtfile = str(foo.path).replace(".stat", "_cnt.txt")
     df = pd.read_csv(txtfile, sep=r"\s+")
     df = df.drop(columns=["SI_BCL.1"])
     df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
@@ -576,7 +577,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     template = "grid_stat_%s_%02d0000L_%s_%s0000V.stat"
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
-    yield Asset({"path": path, "tc": tc, "var": var, "varname": varname}, path.is_file)
+    yield Asset(ns(path=path, tc=tc, var=var, varname=varname), path.is_file)
     if source == Source.FORECAST:
         location = Path(render(c.forecast.path, tc, context=c.raw))
         fcst, datafmt = _forecast_grid(location, c, varname, tc, var)
