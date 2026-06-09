@@ -310,10 +310,21 @@ def _dbrow(c: Config, stat_req: Node):
     fcst_valid_beg = (cycle + leadtime).strftime("%Y%m%d_%H0000")
     varname = foo["varname"]
     stmt = (
-        "select 1 from stats where FCST_VAR = '%s' and FCST_LEV = '%s' and FCST_LEAD = %s and FCST_VALID_BEG = '%s'"
-        % (varname, level_, leadtime_, fcst_valid_beg)
+        "select 1 from stats where"
+        " FCST_VAR = '%s'"
+        " and FCST_LEAD = %s"
+        " and FCST_LEV = '%s'"
+        " and FCST_VALID_BEG = '%s'"
     )
-    yield Asset(None, lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0]).empty)
+    yield Asset(
+        None,
+        lambda: (
+            dbcon.ready
+            and not pd.read_sql(
+                sql=stmt, con=dbcon.ref[0], params=(varname, level_, leadtime_, fcst_valid_beg)
+            ).empty
+        ),
+    )
     reqs = [dbcon, stat_req]
     yield reqs
     txtfile = str(foo["path"]).replace(".stat", "_cnt.txt")
@@ -325,8 +336,8 @@ def _dbrow(c: Config, stat_req: Node):
 @task
 def _dbcon(p: str):
     yield "Database connection"
-    ref = []
-    yield Asset(ref, lambda: ref)
+    ref: list[sqlite3.Connection] = []
+    yield Asset(ref, lambda: bool(ref))
     dbfile = _dbfile(p)
     yield dbfile
     ref.append(sqlite3.connect(dbfile.ref))
