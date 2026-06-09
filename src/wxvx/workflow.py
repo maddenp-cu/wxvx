@@ -315,7 +315,6 @@ def _dbrow(c: Config, stat_req: Node):
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     leadtime = (epoch + meta.tc.leadtime).strftime("%H:%M:%S")
     model = cast(str, (c.forecast if meta.source is Source.FORECAST else c.baseline).name)
-    dbcon = _dbcon(c.paths.run / "wxvx.db")
     params = (
         cycle,
         leadtime,
@@ -324,6 +323,7 @@ def _dbrow(c: Config, stat_req: Node):
         model,
         meta.var.name,
     )
+    dbcon = _dbcon(c.paths.run / "wxvx.db")
     ready = lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty
     yield Asset(None, ready)
     yield [dbcon, stat_req]
