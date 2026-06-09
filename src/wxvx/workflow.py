@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 from enum import Enum, auto
 from functools import cache
 from itertools import chain, pairwise, product
@@ -51,7 +52,6 @@ from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from datetime import datetime
 
     from wxvx.config import Config
     from wxvx.variables import VarMeta
@@ -324,6 +324,16 @@ def _dbrow(c: Config, stat_req: Node):
     txtfile = str(statmeta.path).replace(".stat", "_cnt.txt")
     df = pd.read_csv(txtfile, sep=r"\s+")
     df = df.drop(columns=["SI_BCL.1"])
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    custom = {
+        "cycle": statmeta.tc.cycle.isoformat(),
+        "leadtime": (epoch + statmeta.tc.leadtime).strftime("%H:%M:%S"),
+        "level": statmeta.var.level,
+        "leveltype": statmeta.var.level_type,
+        "validtime": statmeta.tc.validtime,
+        "varname": statmeta.var.name,
+    }
+    df = df.assign(**custom)
     df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
 
 
@@ -344,11 +354,13 @@ def _dbfile(p: str):
     yield "Database %s" % path
     yield Asset(path, path.is_file)
     yield None
-    colinfo = json.loads(resource("columns.json"))
-    colstr = ", ".join(f"{key} {val}" for key, val in colinfo.items())
+    colmaps = json.loads(resource("columns.json"))
+    colinfo = {**colmaps["wxvx"], **colmaps["met"]}
+    colstr = ", ".join(f"{k} {v}" for k, v in colinfo.items())
+    stmt = "create table stats (id integer primary key autoincrement, %s)"
     with atomic(path) as tmp:
         con = sqlite3.connect(tmp)
-        con.execute("create table stats (id integer primary key autoincrement, %s)" % colstr)
+        con.execute(stmt % colstr)
         con.close()
 
 
