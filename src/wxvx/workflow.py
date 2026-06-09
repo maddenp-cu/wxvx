@@ -192,7 +192,7 @@ def _config_grid_stat(
     yield Asset(path, path.is_file)
     yield None
     field_fcst, field_obs = _config_fields(c, varname, var, datafmt)
-    meta = _meta(c, varname)
+    varmeta = _varmeta(c, varname)
     config = {
         MET.fcst: {MET.field: [field_fcst]},
         MET.mask: _met_mask(polyfile),
@@ -200,13 +200,13 @@ def _config_grid_stat(
         MET.nc_pairs_flag: {MET.climo: MET.FALSE, MET.raw: MET.FALSE} if c.ncdiffs else MET.FALSE,
         MET.obs: {MET.field: [field_obs]},
         MET.obtype: c.truth.name,
-        MET.output_flag: dict.fromkeys(sorted({LINETYPE[x] for x in meta.met_stats}), MET.BOTH),
+        MET.output_flag: dict.fromkeys(sorted({LINETYPE[x] for x in varmeta.met_stats}), MET.BOTH),
         MET.output_prefix: f"{prefix}",
         MET.regrid: {MET.method: c.regrid.method, MET.to_grid: c.regrid.to},
         MET.tmp_dir: path.parent,
     }
     if nbrhd := {
-        k: v for k, v in [(MET.shape, meta.nbrhd_shape), (MET.width, meta.nbrhd_width)] if v
+        k: v for k, v in [(MET.shape, varmeta.nbrhd_shape), (MET.width, varmeta.nbrhd_width)] if v
     }:
         config[MET.nbrhd] = nbrhd
     with atomic(path) as tmp:
@@ -298,8 +298,7 @@ def dbrows(c: Config):
 @task
 def _dbrow(c: Config, stat_req: Node):
     statmeta = stat_req.ref
-    varmeta = _meta(c, statmeta.varname)
-    desc = varmeta.description.format(level=statmeta.var.level)
+    desc = _varmeta(c, statmeta.varname).description.format(level=statmeta.var.level)
     cyclestr = f"{yyyymmdd(statmeta.tc.cycle)} {hh(statmeta.tc.cycle)}Z"
     taskname = f"Database row {desc} at {cyclestr} {statmeta.tc.leadtime}"
     yield taskname
@@ -532,9 +531,9 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
 def _plot(
     c: Config, cycle: datetime, varname: str, level: float | None, stat: str, width: int | None
 ):
-    meta = _meta(c, varname)
+    varmeta = _varmeta(c, varname)
     var = _var(c, varname, level)
-    desc = meta.description.format(level=var.level)
+    desc = varmeta.description.format(level=var.level)
     cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
     taskname = f"Plot {desc}{' width ' + str(width) if width else ''} {stat} at {cyclestr}"
     yield taskname
@@ -556,7 +555,7 @@ def _plot(
             "%s %s %s%s vs %s at %s" % (desc, stat, w, c.forecast.name, c.truth.name, cyclestr)
         )
         plt.xlabel("Leadtime")
-        plt.ylabel(f"{stat} ({meta.units})")
+        plt.ylabel(f"{stat} ({varmeta.units})")
         plt.xticks(ticks=[int(lt) for lt in leadtimes], labels=leadtimes, rotation=90)
         plt.legend(title="Model", bbox_to_anchor=(1.02, 1), loc="upper left")
         plt.figtext(0.403, 0.0, f"wxvx {version()}", fontsize=6)
@@ -679,13 +678,13 @@ def _config_fields(c: Config, varname: str, var: Var, datafmt: DataFormat):
     if datafmt != DataFormat.GRIB:
         field_fcst[MET.set_attr_level] = level_obs
     field_obs = {S.level: [level_obs], S.name: varname_truth}
-    meta = _meta(c, varname)
-    if meta.cat_thresh:
+    varmeta = _varmeta(c, varname)
+    if varmeta.cat_thresh:
         for x in field_fcst, field_obs:
-            x[MET.cat_thresh] = meta.cat_thresh
-    if meta.cnt_thresh:
+            x[MET.cat_thresh] = varmeta.cat_thresh
+    if varmeta.cnt_thresh:
         for x in field_fcst, field_obs:
-            x[MET.cnt_thresh] = meta.cnt_thresh
+            x[MET.cnt_thresh] = varmeta.cnt_thresh
     return field_fcst, field_obs
 
 
@@ -786,10 +785,6 @@ def _met_mask(polyfile: Node | None) -> dict[str, list[str]]:
     }
 
 
-def _meta(c: Config, varname: str) -> VarMeta:
-    return VARMETA[c.variables[varname][S.name]]
-
-
 def _prepare_plot_data(reqs: Sequence[Node], stat: str, width: int | None) -> pd.DataFrame:
     linetype = LINETYPE[stat]
     files = [str(x.ref["path"]).replace(".stat", f"_{linetype}.txt") for x in reqs]
@@ -859,18 +854,22 @@ def _stat_reqs(
 
 
 def _stats_widths(c: Config, varname) -> Iterator[tuple[str, int | None]]:
-    meta = _meta(c, varname)
+    varmeta = _varmeta(c, varname)
     return chain.from_iterable(
-        ((stat, width) for width in (meta.nbrhd_width or []))
+        ((stat, width) for width in (varmeta.nbrhd_width or []))
         if LINETYPE[stat] == MET.nbrcnt
         else [(stat, None)]
-        for stat in meta.met_stats
+        for stat in varmeta.met_stats
     )
 
 
 def _var(c: Config, varname: str, level: float | None) -> Var:
-    m = _meta(c, varname)
-    return Var(m.name, m.level_type, level)
+    varmeta = _varmeta(c, varname)
+    return Var(varmeta.name, varmeta.level_type, level)
+
+
+def _varmeta(c: Config, varname: str) -> VarMeta:
+    return VARMETA[c.variables[varname][S.name]]
 
 
 def _varnames_levels(c: Config) -> Iterator[tuple[str, float | None]]:

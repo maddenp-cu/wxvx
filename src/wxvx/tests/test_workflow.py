@@ -966,12 +966,6 @@ def test_workflow__met_mask__no_polyfile():
     assert workflow._met_mask(polyfile=polyfile) == expected
 
 
-def test_workflow__meta(c):
-    meta = workflow._meta(c=c, varname=NOAA.HGT)
-    assert meta.cf_standard_name == "geopotential_height"
-    assert meta.level_type == S.isobaricInhPa
-
-
 @mark.parametrize("dictkey", ["foo", "bar", "baz"])
 def test_workflow__prepare_plot_data(dictkey):
     _, _, dfs, stat, width = TESTDATA[dictkey]
@@ -1069,6 +1063,12 @@ def test_workflow__stats_widths(c):
 
 def test_workflow__var(c, testvars):
     assert workflow._var(c=c, varname=NOAA.HGT, level=900) == testvars[EC.gh]
+
+
+def test_workflow__varmeta(c):
+    meta = workflow._varmeta(c=c, varname=NOAA.HGT)
+    assert meta.cf_standard_name == "geopotential_height"
+    assert meta.level_type == S.isobaricInhPa
 
 
 def test_workflow__varnames_levels(c):
