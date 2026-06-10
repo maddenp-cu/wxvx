@@ -175,7 +175,7 @@ def plots(c: Config):
 
 @collection
 def stats(c: Config):
-    taskname = "WXVX stats for %s vs %s" % (c.forecast.name, c.truth.name)
+    taskname = "Stats database for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
     yield [
         _dbrow(c, stat_req)
@@ -324,11 +324,19 @@ def _dbfile(path: Path):
 @task
 def _dbrow(c: Config, stat_req: Node):
     meta = stat_req.ref
-    vardesc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
-    cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
     model = cast(str, (c.forecast if meta.source is Source.FORECAST else c.baseline).name)
-    taskname = f"Database row {model} {vardesc} {cyclestr}"
+    cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    vardesc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
+    taskname = "Database row %s %s %s %03d" % (
+        model,
+        vardesc,
+        cyclestr,
+        meta.tc.leadtime.total_seconds() / 3600,
+    )
     yield taskname
+    cycle = meta.tc.cycle.isoformat()
+    leadtime = (epoch + meta.tc.leadtime).strftime("%H:%M:%S")
     stmt = (
         "select 1 from stats where"
         " cycle = ?"
@@ -338,9 +346,6 @@ def _dbrow(c: Config, stat_req: Node):
         " and model = ?"
         " and varname = ?"
     )
-    cycle = meta.tc.cycle.isoformat()
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    leadtime = (epoch + meta.tc.leadtime).strftime("%H:%M:%S")
     params = (
         cycle,
         leadtime,
