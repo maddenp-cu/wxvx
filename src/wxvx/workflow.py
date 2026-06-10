@@ -178,7 +178,7 @@ def stats(c: Config):
     taskname = "Stats database for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
     yield [
-        _dbrow(c, stat_req)
+        _db_row(c, stat_req)
         for varname, level in _varnames_levels(c)
         for stat_req in _stat_reqs(c, varname, level)
     ]
@@ -296,18 +296,18 @@ def _config_point_stat(
 
 
 @task
-def _dbcon(path: Path):
+def _db_con(path: Path):
     yield "Database connection to %s" % path
     ref: list[sqlite3.Connection] = []
     yield Asset(ref, lambda: bool(ref))
-    dbfile = _dbfile(path)
+    dbfile = _db_file(path)
     yield dbfile
     assert sqlite3.threadsafety == 3
     ref.append(sqlite3.connect(dbfile.ref))
 
 
 @task
-def _dbfile(path: Path):
+def _db_file(path: Path):
     yield "Database file %s" % path
     yield Asset(path, path.is_file)
     yield None
@@ -322,7 +322,7 @@ def _dbfile(path: Path):
 
 
 @task
-def _dbrow(c: Config, stat_req: Node):
+def _db_row(c: Config, stat_req: Node):
     meta = stat_req.ref
     model = cast(str, (c.forecast if meta.source is Source.FORECAST else c.baseline).name)
     cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
@@ -354,7 +354,7 @@ def _dbrow(c: Config, stat_req: Node):
         model,
         meta.var.name,
     )
-    dbcon = _dbcon(c.paths.run / "wxvx.db")
+    dbcon = _db_con(c.paths.run / "wxvx.db")
     ready = lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty
     yield Asset(None, ready)
     yield [dbcon, stat_req]
