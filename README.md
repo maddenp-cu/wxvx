@@ -405,7 +405,7 @@ Three variables -- geopotential height, composite reflectivity, and 2-meter temp
 
 Finally, because `baseline.name` is set to `truth`, `HRRR` forecasts with validtimes matching those of the `ML` model's forecasts will be verified against `HRRR` analysis, producing MET statistics. If the `plots` task is requested, the `ML` and `HRRR` stats will be plotted together.
 
-Invoking `wxvx -c config.yaml -t grids_truth` would stage the truth grids to disk, only; `-t grids_forecast` would stage the forecast grids; `-t grids` would stage both. Specifying `-t stats` would produce statistics via MET tools, but also stage grids if they are not already available, since the grids are required by the MET processes. Specifying `-t plots` would plot statistics, but also _produce_ statistics (and stage grids) if they are not already available.
+Invoking `wxvx -c config.yaml -t grids_truth` would stage the truth grids to disk, only; `-t grids_forecast` would stage the forecast grids; `-t grids` would stage both. Specifying `-t metstats` would produce statistics via MET tools, but also stage grids if they are not already available, since the grids are required by the MET processes. Specifying `-t plots` would plot statistics, but also _produce_ statistics (and stage grids) if they are not already available.
 
 ## Miscellaneous
 

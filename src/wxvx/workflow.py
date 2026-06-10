@@ -138,6 +138,16 @@ def grids_truth(c: Config):
 
 
 @collection
+def metstats(c: Config):
+    taskname = "MET stats for %s vs %s" % (c.forecast.name, c.truth.name)
+    yield taskname
+    reqs: list[Node] = []
+    for varname, level in _varnames_levels(c):
+        reqs.extend(_stat_reqs(c, varname, level))
+    yield reqs
+
+
+@collection
 def ncobs(c: Config):
     taskname = "Truth netCDF from obs for %s" % c.truth.name
     _enforce_point_truth_type(c, taskname)
@@ -172,16 +182,6 @@ def plots(c: Config):
         for varname, level in _varnames_levels(c)
         for stat, width in _stats_widths(c, varname)
     ]
-
-
-@collection
-def stats(c: Config):
-    taskname = "Stats for %s vs %s" % (c.forecast.name, c.truth.name)
-    yield taskname
-    reqs: list[Node] = []
-    for varname, level in _varnames_levels(c):
-        reqs.extend(_stat_reqs(c, varname, level))
-    yield reqs
 
 
 # Private tasks
