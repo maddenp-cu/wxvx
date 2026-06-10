@@ -124,7 +124,6 @@ def test_cli_main__task_list(caplog, switch, tidy):
         assert e.value.code == 0
         expected = """
         Available tasks:
-          dbrows
           grids
           grids_baseline
           grids_forecast
@@ -133,6 +132,7 @@ def test_cli_main__task_list(caplog, switch, tidy):
           ncobs
           obs
           plots
+          stats
         """
         assert re.sub(r"INFO     [^ ]+ ", "", caplog.text.strip()) == tidy(expected)
 

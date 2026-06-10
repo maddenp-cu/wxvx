@@ -74,17 +74,6 @@ class Source(Enum):
 
 
 @collection
-def dbrows(c: Config):
-    taskname = "Database rows"
-    yield taskname
-    yield [
-        _dbrow(c, stat_req)
-        for varname, level in _varnames_levels(c)
-        for stat_req in _stat_reqs(c, varname, level)
-    ]
-
-
-@collection
 def grids(c: Config):
     yield "Grids"
     reqs = [grids_forecast(c)]
@@ -181,6 +170,17 @@ def plots(c: Config):
         for cycle in c.cycles.values  # noqa: PD011
         for varname, level in _varnames_levels(c)
         for stat, width in _stats_widths(c, varname)
+    ]
+
+
+@collection
+def stats(c: Config):
+    taskname = "WXVX stats for %s vs %s" % (c.forecast.name, c.truth.name)
+    yield taskname
+    yield [
+        _dbrow(c, stat_req)
+        for varname, level in _varnames_levels(c)
+        for stat_req in _stat_reqs(c, varname, level)
     ]
 
 
