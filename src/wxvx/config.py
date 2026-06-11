@@ -47,9 +47,9 @@ class Config:
         paths = raw[S.paths]
         grids = paths[S.grids]
         self.baseline = Baseline(**baseline)
-        self.cycles = Cycles(raw[S.cycles]) if S.cycles in raw else None
+        self.cycles = Cycles(raw.get(S.cycles))
         self.forecast = Forecast(**raw[S.forecast])
-        self.leadtimes = Leadtimes(raw[S.leadtimes]) if S.leadtimes in raw else None
+        self.leadtimes = Leadtimes(raw.get(S.leadtimes))
         self.ncdiffs: bool = raw.get(S.ncdiffs, False)
         self.paths = Paths(
             grids.get(S.baseline),
@@ -60,7 +60,7 @@ class Config:
         )
         self.raw = raw
         self.regrid = Regrid(**raw.get(S.regrid, {}))
-        self.timepairs = Timepairs(raw[S.timepairs]) if S.timepairs in raw else None
+        self.timepairs = Timepairs(raw.get(S.timepairs))
         self.truth = Truth(**raw[S.truth])
         self.variables = raw[S.variables]
         self._validate()
@@ -179,7 +179,7 @@ class Coords:
 
 
 class Cycles:
-    def __init__(self, raw: dict[str, str | int | datetime] | list[str | datetime]):
+    def __init__(self, raw: dict[str, str | int | datetime] | list[str | datetime] | None):
         self.raw = raw
 
     def __eq__(self, other):
@@ -199,7 +199,9 @@ class Cycles:
             ]
             td_step = to_timedelta(cast(_TimedeltaT, self.raw[S.step]))
             return expand(dt_start, td_step, dt_stop)
-        return sorted(map(to_datetime, self.raw))
+        if isinstance(self.raw, list):
+            return sorted(map(to_datetime, self.raw))
+        return []
 
 
 class Forecast:
@@ -271,7 +273,7 @@ class Forecast:
 
 
 class Leadtimes:
-    def __init__(self, raw: dict[str, str | int] | list[str | int]):
+    def __init__(self, raw: dict[str, str | int] | list[str | int] | None):
         self.raw = raw
 
     def __eq__(self, other):
@@ -290,7 +292,9 @@ class Leadtimes:
                 to_timedelta(cast(_TimedeltaT, self.raw[x])) for x in (S.start, S.step, S.stop)
             ]
             return expand(td_start, td_step, td_stop)
-        return sorted(map(to_timedelta, self.raw))
+        if isinstance(self.raw, list):
+            return sorted(map(to_timedelta, self.raw))
+        return []
 
 
 @dataclass(frozen=True)
@@ -349,7 +353,7 @@ class ToGrid:
 
 
 class Timepairs:
-    def __init__(self, raw: list[list[_DatetimeT | _TimedeltaT]]):
+    def __init__(self, raw: list[list[_DatetimeT | _TimedeltaT]] | None):
         self.raw = raw
 
     def __eq__(self, other):
@@ -363,10 +367,12 @@ class Timepairs:
 
     @cached_property
     def values(self) -> list[tuple[datetime, timedelta]]:
-        return [
-            (to_datetime(cast(_DatetimeT, pair[0])), to_timedelta(cast(_TimedeltaT, pair[1])))
-            for pair in self.raw
-        ]
+        if isinstance(self.raw, list):
+            return [
+                (to_datetime(cast(_DatetimeT, pair[0])), to_timedelta(cast(_TimedeltaT, pair[1])))
+                for pair in self.raw
+            ]
+        return []
 
 
 @dataclass(frozen=True)
