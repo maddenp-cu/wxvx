@@ -150,9 +150,10 @@ def obs(c: Config):
 @collection
 def plots(c: Config):
     taskname = "Plots for %s vs %s" % (c.forecast.name, c.truth.name)
+    leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]  # noqa: PD011
     yield taskname
     yield [
-        _plot(c, cycle, varname, level, stat, width)
+        _plot(c, cycle, leadtimes, varname, level, stat, width)
         for cycle in c.cycles.values  # noqa: PD011
         for varname, level in _varnames_levels(c)
         for stat, width in _stats_widths(c, varname)
@@ -440,7 +441,13 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
 
 @task
 def _plot(
-    c: Config, cycle: datetime, varname: str, level: float | None, stat: str, width: int | None
+    c: Config,
+    cycle: datetime,
+    leadtimes: list[str],
+    varname: str,
+    level: float | None,
+    stat: str,
+    width: int | None,
 ):
     meta = _meta(c, varname)
     var = _var(c, varname, level)
@@ -453,7 +460,6 @@ def _plot(
     yield Asset(path, path.is_file)
     reqs = _stat_reqs(c, varname, level, cycle)
     yield reqs
-    leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]  # noqa: PD011
     plot_data = _prepare_plot_data(reqs, stat, width)
     hue = MET.LABEL if MET.LABEL in plot_data.columns else MET.MODEL
     w = f"(width={width}) " if width else ""
@@ -735,7 +741,9 @@ def _regrid_width(c: Config) -> int:
         raise WXVXError(msg) from e
 
 
-def _stat_args(c: Config, varname: str, level: float | None, source: Source, cycle: datetime) -> Iterator:
+def _stat_args(
+    c: Config, varname: str, level: float | None, source: Source, cycle: datetime
+) -> Iterator:
     start = cycle.strftime("%Y-%m-%dT%H:%M:%S")
     step = "00:00:00"
     stop = start
