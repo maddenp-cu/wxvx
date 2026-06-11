@@ -151,10 +151,14 @@ def test_workflow_plots(c, noop):
     )
 
 
-def test_workflow_stats(c, noop):
-    with patch.object(workflow, "_stat_reqs", return_value=[noop()]) as _stat_reqs:
-        node = workflow.stats(c=c)
-    assert len(node.ref) == len(c.variables) + 1  # for 2x SPFH levels
+def test_workflow_stats(c):
+    #   2 sources (forecast and baseline)
+    # x 2 cycles
+    # x 3 leadtimes
+    # x 5 varlevels (gh, refc, 2t x 1 level + q x 2 levels)
+    # = 60 stat runs
+    node = workflow.stats(c=c)
+    assert len(node.ref) == 60
 
 
 @mark.parametrize("source", [Source.FORECAST, Source.TRUTH])
