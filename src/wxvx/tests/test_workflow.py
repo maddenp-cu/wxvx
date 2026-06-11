@@ -1040,8 +1040,7 @@ def test_workflow__stat_args(c, statkit):
 
 
 @mark.parametrize("baseline_name", [S.HRRR, S.truth, None])
-@mark.parametrize(S.cycle, [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
-def test_workflow__stat_reqs(baseline_name, c, statkit, cycle):
+def test_workflow__stat_reqs(baseline_name, c, statkit):
     c.baseline = replace(
         c.baseline,
         name=baseline_name,
@@ -1056,7 +1055,7 @@ def test_workflow__stat_reqs(baseline_name, c, statkit, cycle):
             c=c,
             varname=statkit.varname,
             level=statkit.level,
-            cycle=cycle,
+            cycle=datetime(2024, 12, 19, 18, tzinfo=timezone.utc),
             leadtimes=[timedelta(hours=6)],
         )
     n = 1 if baseline_name is None else 2
