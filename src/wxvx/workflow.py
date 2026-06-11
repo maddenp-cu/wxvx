@@ -735,16 +735,11 @@ def _regrid_width(c: Config) -> int:
         raise WXVXError(msg) from e
 
 
-def _stat_args(
-    c: Config, varname: str, level: float | None, source: Source, cycle: datetime | None
-) -> Iterator:
-    if cycle:
-        start = cycle.strftime("%Y-%m-%dT%H:%M:%S")
-        step = "00:00:00"
-        stop = start
-        cycles = Cycles(dict(start=start, step=step, stop=stop))
-    else:
-        cycles = c.cycles
+def _stat_args(c: Config, varname: str, level: float | None, source: Source, cycle: datetime) -> Iterator:
+    start = cycle.strftime("%Y-%m-%dT%H:%M:%S")
+    step = "00:00:00"
+    stop = start
+    cycles = Cycles(dict(start=start, step=step, stop=stop))
     sections = {Source.BASELINE: c.baseline, Source.FORECAST: c.forecast, Source.TRUTH: c.truth}
     name = cast(Named, sections[source]).name.lower()
     prefix = lambda var: "%s_%s" % (name.replace(" ", "_"), str(var).replace("-", "_"))

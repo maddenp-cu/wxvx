@@ -1011,8 +1011,7 @@ def test_workflow__regrid_width(c):
     assert str(e.value) == "Could not determine 'width' value for regrid method 'FOO'"
 
 
-@mark.parametrize(S.cycle, [datetime(2024, 12, 19, 18, tzinfo=timezone.utc), None])
-def test_workflow__stat_args(c, statkit, cycle):
+def test_workflow__stat_args(c, statkit):
     with (
         patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
         patch.object(workflow, "gen_timecoords", return_value=[statkit.tc]),
@@ -1022,7 +1021,7 @@ def test_workflow__stat_args(c, statkit, cycle):
             varname=statkit.varname,
             level=statkit.level,
             source=statkit.source,
-            cycle=cycle,
+            cycle=datetime(2024, 12, 19, 18, tzinfo=timezone.utc),
         )
     assert list(stat_args) == [
         (c, statkit.varname, statkit.tc, statkit.var, statkit.prefix, statkit.source)
