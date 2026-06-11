@@ -126,6 +126,8 @@ def grids_truth(c: Config):
 def ncobs(c: Config):
     taskname = "Truth netCDF from obs for %s" % c.truth.name
     _enforce_point_truth_type(c, taskname)
+    assert c.cycles is not None
+    assert c.leadtimes is not None
     yield taskname
     yield [
         _netcdf_from_obs(c, TimeCoords(tc.validtime))
@@ -137,6 +139,8 @@ def ncobs(c: Config):
 def obs(c: Config):
     taskname = "Truth obs for %s" % c.truth.name
     _enforce_point_truth_type(c, taskname)
+    assert c.cycles is not None
+    assert c.leadtimes is not None
     yield taskname
     reqs = []
     for tc in gen_timecoords_truth(c.cycles, c.leadtimes):
@@ -150,6 +154,7 @@ def obs(c: Config):
 @collection
 def plots(c: Config):
     taskname = "Plots for %s vs %s" % (c.forecast.name, c.truth.name)
+    assert c.cycles is not None
     yield taskname
     yield [
         _plot(c, cycle, varname, level, stat, width)
@@ -442,6 +447,7 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
 def _plot(
     c: Config, cycle: datetime, varname: str, level: float | None, stat: str, width: int | None
 ):
+    assert c.leadtimes is not None
     meta = _meta(c, varname)
     var = _var(c, varname, level)
     desc = meta.description.format(level=var.level)
@@ -738,6 +744,8 @@ def _regrid_width(c: Config) -> int:
 def _stat_args(
     c: Config, varname: str, level: float | None, source: Source, cycle: datetime | None
 ) -> Iterator:
+    assert c.cycles is not None
+    assert c.leadtimes is not None
     if cycle:
         start = cycle.strftime("%Y-%m-%dT%H:%M:%S")
         step = "00:00:00"
@@ -792,6 +800,8 @@ def _varnames_levels(c: Config) -> Iterator[tuple[str, float | None]]:
 
 
 def _vars_varnames_times(c: Config) -> Iterator[tuple[Var, str, TimeCoords]]:
+    assert c.cycles is not None
+    assert c.leadtimes is not None
     return iter(
         (var, varname, tc)
         for var, varname in _vxvars(c).items()

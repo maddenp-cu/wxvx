@@ -47,9 +47,9 @@ class Config:
         paths = raw[S.paths]
         grids = paths[S.grids]
         self.baseline = Baseline(**baseline)
-        self.cycles = Cycles(raw[S.cycles])
+        self.cycles = Cycles(raw[S.cycles]) if S.cycles in raw else None
         self.forecast = Forecast(**raw[S.forecast])
-        self.leadtimes = Leadtimes(raw[S.leadtimes])
+        self.leadtimes = Leadtimes(raw[S.leadtimes]) if S.leadtimes in raw else None
         self.ncdiffs: bool = raw.get(S.ncdiffs, False)
         self.paths = Paths(
             grids.get(S.baseline),
@@ -60,11 +60,21 @@ class Config:
         )
         self.raw = raw
         self.regrid = Regrid(**raw.get(S.regrid, {}))
+        self.timepairs = Timepairs(raw[S.timepairs]) if S.timepairs in raw else None
         self.truth = Truth(**raw[S.truth])
         self.variables = raw[S.variables]
         self._validate()
 
-    KEYS = (S.baseline, S.cycles, S.forecast, S.leadtimes, S.paths, S.truth, S.variables)
+    KEYS = (
+        S.baseline,
+        S.cycles,
+        S.forecast,
+        S.leadtimes,
+        S.paths,
+        S.timepairs,
+        S.truth,
+        S.variables,
+    )
 
     def __eq__(self, other):
         return all(getattr(self, k) == getattr(other, k) for k in self.KEYS)
@@ -336,6 +346,27 @@ class ToGrid:
         if isinstance(self.val, ToGridVal):
             return self.val.name
         return self.val
+
+
+class Timepairs:
+    def __init__(self, raw: list[list[_DatetimeT | _TimedeltaT]]):
+        self.raw = raw
+
+    def __eq__(self, other):
+        return self.values == other.values
+
+    def __hash__(self):
+        return hash(tuple(self.values))
+
+    def __repr__(self):
+        return "%s(%s)" % (self.__class__.__name__, self.raw)
+
+    @cached_property
+    def values(self) -> list[tuple[datetime, timedelta]]:
+        return [
+            (to_datetime(cast(_DatetimeT, pair[0])), to_timedelta(cast(_TimedeltaT, pair[1])))
+            for pair in self.raw
+        ]
 
 
 @dataclass(frozen=True)
