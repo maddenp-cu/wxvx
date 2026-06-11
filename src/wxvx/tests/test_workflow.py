@@ -1115,7 +1115,7 @@ def test_workflow__write_runscript(fakefs, tidy):
 
 @fixture
 def ngrids(c):
-    n_validtimes = len(list(gen_timecoords(c.cycles, c.leadtimes)))
+    n_validtimes = len(list(gen_timecoords(c.cycles, c.leadtimes, c.timepairs)))
     n_var_level_pairs = len(list(workflow._varnames_levels(c)))
     return n_validtimes * n_var_level_pairs
 

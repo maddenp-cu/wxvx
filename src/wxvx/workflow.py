@@ -129,7 +129,7 @@ def ncobs(c: Config):
     yield taskname
     yield [
         _netcdf_from_obs(c, TimeCoords(tc.validtime))
-        for tc in gen_timecoords_truth(c.cycles, c.leadtimes)
+        for tc in gen_timecoords_truth(c.cycles, c.leadtimes, c.timepairs)
     ]
 
 
@@ -139,7 +139,7 @@ def obs(c: Config):
     _enforce_point_truth_type(c, taskname)
     yield taskname
     reqs = []
-    for tc in gen_timecoords_truth(c.cycles, c.leadtimes):
+    for tc in gen_timecoords_truth(c.cycles, c.leadtimes, c.timepairs):
         tc_valid = TimeCoords(tc.validtime)
         url = render(c.truth.url, tc_valid, context=c.raw)
         yyyymmdd, hh, _ = tcinfo(tc_valid)
@@ -750,7 +750,9 @@ def _stat_args(
     prefix = lambda var: "%s_%s" % (name.replace(" ", "_"), str(var).replace("-", "_"))
     args = [
         (c, vn, tc, var, prefix(var), source)
-        for (var, vn), tc in product(_vxvars(c).items(), gen_timecoords(cycles, c.leadtimes))
+        for (var, vn), tc in product(
+            _vxvars(c).items(), gen_timecoords(cycles, c.leadtimes, c.timepairs)
+        )
         if vn == varname and var.level == level
     ]
     return iter(sorted(args))
@@ -795,7 +797,7 @@ def _vars_varnames_times(c: Config) -> Iterator[tuple[Var, str, TimeCoords]]:
     return iter(
         (var, varname, tc)
         for var, varname in _vxvars(c).items()
-        for tc in gen_timecoords(c.cycles, c.leadtimes)
+        for tc in gen_timecoords(c.cycles, c.leadtimes, c.timepairs)
     )
 
 
