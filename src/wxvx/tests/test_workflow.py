@@ -626,7 +626,13 @@ def test_workflow__plot(c, dictkey, fakefs, fs):
         cycle = c.cycles.values[0]
         leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]
         node = workflow._plot(
-            c=c, varname=varname, level=level, cycle=cycle, leadtimes=leadtimes, stat=stat, width=width
+            c=c,
+            varname=varname,
+            level=level,
+            cycle=cycle,
+            leadtimes=leadtimes,
+            stat=stat,
+            width=width,
         )
     path = node.ref
     assert node.ready
