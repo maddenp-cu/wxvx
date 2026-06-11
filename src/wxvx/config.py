@@ -369,8 +369,8 @@ class Timepairs:
     def values(self) -> list[tuple[datetime, timedelta]]:
         if isinstance(self.raw, list):
             return [
-                (to_datetime(cast(_DatetimeT, pair[0])), to_timedelta(cast(_TimedeltaT, pair[1])))
-                for pair in self.raw
+                (to_datetime(cast(_DatetimeT, cycle)), to_timedelta(cast(_TimedeltaT, leadtime)))
+                for cycle, leadtime in self.raw
             ]
         return []
 

@@ -5,7 +5,7 @@ Tests for wxvx.workflow.
 import os
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from textwrap import dedent, indent
 from types import SimpleNamespace as ns
@@ -1029,6 +1029,7 @@ def test_workflow__stat_args(c, statkit):
             level=statkit.level,
             source=statkit.source,
             cycle=datetime(2024, 12, 19, 18, tzinfo=timezone.utc),
+            leadtimes=[timedelta(hours=6)],
         )
     assert list(stat_args) == [
         (c, statkit.varname, statkit.tc, statkit.var, statkit.prefix, statkit.source)
@@ -1048,7 +1049,13 @@ def test_workflow__stat_reqs(baseline_name, c, statkit, cycle):
         patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
         patch.object(workflow, "gen_timecoords", return_value=[statkit.tc]),
     ):
-        reqs = workflow._stat_reqs(c=c, varname=statkit.varname, level=statkit.level, cycle=cycle)
+        reqs = workflow._stat_reqs(
+            c=c,
+            varname=statkit.varname,
+            level=statkit.level,
+            cycle=cycle,
+            leadtimes=[timedelta(hours=6)],
+        )
     n = 1 if baseline_name is None else 2
     assert len(reqs) == n
     assert _stats_vs_grid.call_count == n

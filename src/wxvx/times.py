@@ -36,24 +36,15 @@ class TimeCoords:
 
 
 def gen_timecoords(cycles: Cycles, leadtimes: Leadtimes, timepairs: Timepairs) -> list[TimeCoords]:
-    if timepairs.values:
-        return sorted(
-            {TimeCoords(cycle=cycle, leadtime=leadtime) for cycle, leadtime in timepairs.values}
-        )
-    return sorted(
-        {
-            TimeCoords(cycle=cycle, leadtime=leadtime)
-            for cycle, leadtime in product(cycles.values, leadtimes.values)
-        }
-    )
+    tp = timepairs.values or product(cycles.values, leadtimes.values)
+    return sorted({TimeCoords(cycle=cycle, leadtime=leadtime) for cycle, leadtime in tp})
 
 
 def gen_timecoords_truth(
     cycles: Cycles, leadtimes: Leadtimes, timepairs: Timepairs
 ) -> list[TimeCoords]:
-    return sorted(
-        {TimeCoords(cycle=tc.validtime) for tc in gen_timecoords(cycles, leadtimes, timepairs)}
-    )
+    timecoords = gen_timecoords(cycles, leadtimes, timepairs)
+    return sorted({TimeCoords(cycle=x.validtime) for x in timecoords})
 
 
 def hh(dt: datetime) -> str:
