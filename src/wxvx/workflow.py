@@ -147,6 +147,7 @@ def obs(c: Config):
     yield reqs
 
 
+# PM FIXME
 @collection
 def plots(c: Config):
     taskname = "Plots for %s vs %s" % (c.forecast.name, c.truth.name)
