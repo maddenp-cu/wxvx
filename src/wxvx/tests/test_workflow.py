@@ -157,8 +157,7 @@ def test_workflow_stats(c):
     # x 3 leadtimes
     # x 5 varlevels (gh, refc, 2t x 1 level + q x 2 levels)
     # = 60 stat runs
-    node = workflow.stats(c=c)
-    assert len(node.ref) == 60
+    assert len(workflow.stats(c=c).ref) == 60
 
 
 @mark.parametrize("source", [Source.FORECAST, Source.TRUTH])
@@ -628,7 +627,7 @@ def test_workflow__plot(c, dictkey, fakefs, fs):
         _prepare_plot_data.side_effect = dfs
         os.environ["MPLCONFIGDIR"] = str(fakefs)
         cycle = c.cycles.values[0]
-        leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]
+        leadtimes = c.leadtimes.values
         node = workflow._plot(
             c=c,
             varname=varname,
