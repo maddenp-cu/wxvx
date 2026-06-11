@@ -150,14 +150,26 @@ def obs(c: Config):
 @collection
 def plots(c: Config):
     taskname = "Plots for %s vs %s" % (c.forecast.name, c.truth.name)
-    leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]  # noqa: PD011
     yield taskname
-    yield [
-        _plot(c, cycle, leadtimes, varname, level, stat, width)
-        for cycle in c.cycles.values  # noqa: PD011
-        for varname, level in _varnames_levels(c)
-        for stat, width in _stats_widths(c, varname)
-    ]
+    if c.timepairs.values:
+        cycles_leadtimes: dict[datetime, list[str]] = {}
+        for cycle, td in c.timepairs.values:
+            cycles_leadtimes.setdefault(cycle, []).append("%03d" % (td.total_seconds() // 3600))
+        cycles_leadtimes = {k: sorted(set(v)) for k, v in sorted(cycles_leadtimes.items())}
+        yield [
+            _plot(c, cycle, leadtimes, varname, level, stat, width)
+            for cycle, leadtimes in cycles_leadtimes.items()
+            for varname, level in _varnames_levels(c)
+            for stat, width in _stats_widths(c, varname)
+        ]
+    else:
+        leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]
+        yield [
+            _plot(c, cycle, leadtimes, varname, level, stat, width)
+            for cycle in c.cycles.values
+            for varname, level in _varnames_levels(c)
+            for stat, width in _stats_widths(c, varname)
+        ]
 
 
 @collection
