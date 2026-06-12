@@ -5,7 +5,7 @@ Tests for wxvx.workflow.
 import os
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 from textwrap import dedent, indent
 from types import SimpleNamespace as ns
@@ -427,6 +427,30 @@ def test_workflow__config_point_stat__unsupported_regrid_method(c, fakefs, testv
     )
     assert not task.ready
     assert not path.is_file()
+
+
+def test_workflow__cycle_leadtimes_map__cycles_leadtimes(c, utc):
+    expected = {
+        utc(2024, 12, 19, 18): [timedelta(hours=0), timedelta(hours=6), timedelta(hours=12)],
+        utc(2024, 12, 20, 6): [timedelta(hours=0), timedelta(hours=6), timedelta(hours=12)],
+    }
+    assert workflow._cycle_leadtimes_map(c) == expected
+
+
+def test_workflow__cycle_leadtimes_map__timepairs(config_data, fakefs, gen_config, utc):
+    data = with_del(with_del(config_data, S.cycles), S.leadtimes)
+    data[S.timepairs] = [
+        ["2024-12-19T18:00:00", "06:00:00"],
+        ["2024-12-19T18:00:00", "12:00:00"],
+        ["2024-12-20T06:00:00", "00:00:00"],
+        ["2024-12-20T06:00:00", "06:00:00"],
+    ]
+    c = gen_config(data, fakefs)
+    expected = {
+        utc(2024, 12, 19, 18): [timedelta(hours=6), timedelta(hours=12)],
+        utc(2024, 12, 20, 6): [timedelta(hours=0), timedelta(hours=6)],
+    }
+    assert workflow._cycle_leadtimes_map(c) == expected
 
 
 def test_workflow__existing(fakefs):
@@ -1021,24 +1045,24 @@ def test_workflow__regrid_width(c):
     assert str(e.value) == "Could not determine 'width' value for regrid method 'FOO'"
 
 
-def test_workflow__stat_args(c, statkit):
+def test_workflow__stat_args(c, statkit, utc):
     with patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}):
         stat_args = workflow._stat_args(
             c=c,
             varname=statkit.varname,
             level=statkit.level,
             source=statkit.source,
-            cycle=datetime(2024, 12, 19, 18, tzinfo=timezone.utc),
+            cycle=utc(2024, 12, 19, 18),
             leadtimes=[timedelta(hours=6)],
         )
-    tc = TimeCoords(datetime(2024, 12, 19, 18, tzinfo=timezone.utc), timedelta(hours=6))
+    tc = TimeCoords(utc(2024, 12, 19, 18), timedelta(hours=6))
     assert list(stat_args) == [
         (c, statkit.varname, tc, statkit.var, statkit.prefix, statkit.source)
     ]
 
 
 @mark.parametrize("baseline_name", [S.HRRR, S.truth, None])
-def test_workflow__stat_reqs(baseline_name, c, statkit):
+def test_workflow__stat_reqs(baseline_name, c, statkit, utc):
     c.baseline = replace(
         c.baseline,
         name=baseline_name,
@@ -1049,11 +1073,11 @@ def test_workflow__stat_reqs(baseline_name, c, statkit):
             c=c,
             varname=statkit.varname,
             level=statkit.level,
-            cycle=datetime(2024, 12, 19, 18, tzinfo=timezone.utc),
+            cycle=utc(2024, 12, 19, 18),
             leadtimes=[timedelta(hours=6)],
         )
     n = 1 if baseline_name is None else 2
-    tc = TimeCoords(datetime(2024, 12, 19, 18, 0, tzinfo=timezone.utc), timedelta(hours=6))
+    tc = TimeCoords(utc(2024, 12, 19, 18, 0), timedelta(hours=6))
     callargs = _stats_vs_grid.call_args_list[0].args
     assert len(reqs) == n
     assert _stats_vs_grid.call_count == n
