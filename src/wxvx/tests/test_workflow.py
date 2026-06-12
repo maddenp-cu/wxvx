@@ -453,6 +453,25 @@ def test_workflow__cycle_leadtimes_map__timepairs(config_data, fakefs, gen_confi
     assert workflow._cycle_leadtimes_map(c) == expected
 
 
+def test_workflow__cycle_leadtimes_map__timepairs_dedup(config_data, fakefs, gen_config, utc):
+    # Duplicate cycle/leadtime pairs in the timepairs list are de-duplicated: Each cycle maps to a
+    # sorted list of unique leadtimes.
+    data = with_del(with_del(config_data, S.cycles), S.leadtimes)
+    data[S.timepairs] = [
+        ["2024-12-19T18:00:00", "06:00:00"],
+        ["2024-12-19T18:00:00", "06:00:00"],
+        ["2024-12-19T18:00:00", "12:00:00"],
+        ["2024-12-20T06:00:00", "00:00:00"],
+        ["2024-12-20T06:00:00", "00:00:00"],
+    ]
+    c = gen_config(data, fakefs)
+    expected = {
+        utc(2024, 12, 19, 18): [timedelta(hours=6), timedelta(hours=12)],
+        utc(2024, 12, 20, 6): [timedelta(hours=0)],
+    }
+    assert workflow._cycle_leadtimes_map(c) == expected
+
+
 def test_workflow__existing(fakefs):
     path = fakefs / S.forecast
     assert not workflow._existing(path=path).ready
