@@ -606,16 +606,11 @@ def _config_fields(c: Config, varname: str, var: Var, datafmt: DataFormat):
 
 
 def _cycle_leadtimes_map(c: Config) -> dict[datetime, list[timedelta]]:
-    clmap: dict[datetime, list[timedelta]] = {}
-    # PM FIXME with e.g. timepairs  = c.timepairs.values or [...
-    if c.timepairs.values:
-        for cycle, leadtime in c.timepairs.values:
-            clmap.setdefault(cycle, []).append(leadtime)
-    else:
-        for cycle in c.cycles.values:
-            for leadtime in c.leadtimes.values:
-                clmap.setdefault(cycle, []).append(leadtime)
-    return {k: sorted(set(v)) for k, v in sorted(clmap.items())}
+    timepairs = c.timepairs.values or product(c.cycles.values, c.leadtimes.values)
+    m: dict[datetime, list[timedelta]] = {}
+    for cycle, leadtime in timepairs:
+        m.setdefault(cycle, []).append(leadtime)
+    return {cycle: sorted(set(leadtimes)) for cycle, leadtimes in sorted(m.items())}
 
 
 def _enforce_point_truth_type(c: Config, taskname: str):
