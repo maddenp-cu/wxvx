@@ -322,6 +322,25 @@ def test_config_Time(config_data, time):
     assert obj != other2
 
 
+def test_config_Timepairs(utc):
+    raw: list = [["2026-06-10T18:00:00", "06:00:00"], ["2026-06-11T06:00:00", 12]]
+    obj = config.Timepairs(raw=raw)
+    expected = [
+        (utc(2026, 6, 10, 18), timedelta(hours=6)),
+        (utc(2026, 6, 11, 6), timedelta(hours=12)),
+    ]
+    assert obj.values == expected
+    assert obj == config.Timepairs(raw=raw)
+    assert obj != config.Timepairs(raw=[["2026-06-10T18:00:00", "03:00:00"]])
+    assert hash(obj)
+    assert str(obj) == repr(obj)
+    assert repr(obj) == "Timepairs(%s)" % raw
+
+
+def test_config_Timepairs__none():
+    assert config.Timepairs(raw=None).values == []
+
+
 def test_config_ToGrid():
     for f in [repr, str]:
         f = cast(Callable, f)
