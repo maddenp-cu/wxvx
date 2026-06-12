@@ -217,6 +217,10 @@ def test_config_Cycles():
     assert repr(x3) == "Cycles({'start': '%s', 'step': %s, 'stop': '%s'})" % (ts1, td, ts3)
 
 
+def test_config_Cycles__none():
+    assert config.Cycles(raw=None).values == []
+
+
 def test_config_Forecast(config_data, forecast):
     obj = forecast
     assert hash(obj)
