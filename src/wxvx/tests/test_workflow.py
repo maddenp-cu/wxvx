@@ -1046,11 +1046,7 @@ def test_workflow__stat_reqs(baseline_name, c, statkit):
         name=baseline_name,
         url=None if baseline_name == S.truth else c.baseline.url,
     )
-    with (
-        patch.object(workflow, "_stats_vs_grid") as _stats_vs_grid,
-        patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
-        patch.object(workflow, "gen_timecoords", return_value=[statkit.tc]),
-    ):
+    with patch.object(workflow, "_stats_vs_grid") as _stats_vs_grid:
         reqs = workflow._stat_reqs(
             c=c,
             varname=statkit.varname,
@@ -1059,14 +1055,17 @@ def test_workflow__stat_reqs(baseline_name, c, statkit):
             leadtimes=[timedelta(hours=6)],
         )
     n = 1 if baseline_name is None else 2
+    tc = TimeCoords(datetime(2024, 12, 19, 18, 0, tzinfo=timezone.utc), timedelta(hours=6))
+    callargs = _stats_vs_grid.call_args_list[0].args
     assert len(reqs) == n
     assert _stats_vs_grid.call_count == n
-    args = (c, statkit.varname, statkit.tc, statkit.var)
-    assert _stats_vs_grid.call_args_list[0].args == (
-        *args,
-        f"forecast_model_gh_{statkit.level_type}_{statkit.level:04d}",
-        Source.FORECAST,
-    )
+    assert len(callargs) == 6
+    assert callargs[0] == c
+    assert callargs[1] == statkit.varname
+    assert callargs[2] == tc
+    assert callargs[3] == statkit.var
+    assert callargs[4] == f"forecast_model_gh_{statkit.level_type}_{statkit.level:04d}"
+    assert callargs[5] == Source.FORECAST
 
 
 def test_workflow__stats_widths(c):
