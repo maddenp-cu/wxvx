@@ -274,6 +274,10 @@ def test_config_Leadtimes():
     assert config.Leadtimes(raw=["0:360", "0:480:3600", 3]).values == expected
 
 
+def test_config_Leadtimes__none():
+    assert config.Leadtimes(raw=None).values == []
+
+
 def test_config_Paths(paths, config_data):
     obj = paths
     assert obj.grids_baseline == Path(config_data[S.paths][S.grids][S.baseline])
