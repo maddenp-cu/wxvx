@@ -71,6 +71,7 @@ An overview of the content of the YAML configuration file specified via `-c` / `
 │ regrid:            │ MET regrid options                        │
 │   method:          │   Regridding method                       │
 │   to:              │   Destination grid                        │
+│ timepairs:         │ Explicit cycle/leadtime pairs to verify   │
 │ truth:             │ Description of the truth dataset          │
 │   name:            │   Dataset descriptive name                │
 │   type:            │   Either 'grid' or 'point'                │
@@ -96,6 +97,8 @@ The name of a GRIB-formatted, `wxvx`-recognized model (currently `GFS` or `HRRR`
 Specifies the location of baseline data. Values may be local-filesystem paths (optionally prefixed with `file://`) or HTTP URLs prefixed with `http://` or `https://` and may contain Jinja2 [expressions](#expressions). This value must be omitted when `baseline.name` is `truth`, and must be supplied otherwise.
 
 ### cycles
+
+Note: `cycles` and `leadtimes` are mutually exclusive with `timepairs`. Specify either `cycles` + `leadtimes`, or `timepairs`, but not both.
 
 The `start` and `stop` values should be in optionally quoted [ISO8601](https://en.wikipedia.org/wiki/ISO_8601) year/month/date/hour/minute/second form, e.g. `2025-06-03T12:00:00`. The `step` value should be either an `int` specifying the number of hours, or a quoted string of the form `hours[:minutes[:seconds]]` specifying hours and, optionally, minutes and seconds.
 
@@ -179,6 +182,8 @@ The `forecast.projection` block is optional, and defaults to a `latlon` projecti
 
 ### leadtimes
 
+Note: `leadtimes` and `cycles` are mutually exclusive with `timepairs`. Specify either `cycles` + `leadtimes`, or `timepairs`, but not both.
+
 Each value should be either an `int` specifying the number of hours, or a **quoted string** of the form `hours[:minutes[:seconds]]` specifying hours and, optionally, minutes and seconds. (See [this post](https://ruudvanasseldonk.com/2023/01/11/the-yaml-document-from-hell#sexagesimal-numbers) for a discussion on why these values must be quoted.)
 
 When using `start` / `step` / `stop` syntax, the final leadtime is included in verification. That is, the range is inclusive of its upper bound.
@@ -241,6 +246,25 @@ Options are listed [here](https://metplus.readthedocs.io/projects/met/en/main_v1
 ### regrid.to
 
 Regrid grids and observations to the specified grid. Options are `truth`, `forecast`, or a [GNNN grid ID](https://metplus.readthedocs.io/projects/met/en/main_v11.0/Users_Guide/appendixB.html#grids) (default: `forecast`). Option `truth` must not be used when `truth.type` is `point`.
+
+### timepairs
+
+An explicit sequence of cycle/leadtime pairs to verify. This is mutually exclusive with `cycles` and `leadtimes`: specify either `cycles` + `leadtimes`, or `timepairs`, but not both.
+
+Each element is a two-element sequence `[cycle, leadtime]`, where:
+
+- `cycle` is an ISO8601 datetime string, e.g. `2025-06-03T12:00:00`.
+- `leadtime` is either an `int` specifying the number of hours, or a **quoted string** of the form `hours[:minutes[:seconds]]`.
+
+Unlike the Cartesian product produced by separate `cycles` and `leadtimes` specifications, `timepairs` allows specifying arbitrary combinations. For example:
+
+``` yaml
+timepairs:
+  - [2025-06-01T06:00:00, "06:00:00"]
+  - [2025-06-01T06:00:00, "12:00:00"]
+  - [2025-06-02T00:00:00, 3]
+  - [2025-06-02T00:00:00, 9]
+```
 
 ### truth
 
