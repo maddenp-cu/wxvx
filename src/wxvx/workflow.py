@@ -162,7 +162,6 @@ def plots(c: Config):
 def stats(c: Config):
     taskname = "Stats for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
-    # PM FIXME rewrite as comprehension
     reqs: list[Node] = []
     for varname, level in _varnames_levels(c):
         for cycle, leadtimes in _cycle_leadtimes_map(c).items():
