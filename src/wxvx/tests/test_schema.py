@@ -308,7 +308,7 @@ def test_schema_regrid(logged, config_data, fs):
 def test_schema_time_keys(logged, config_data, fs):
     ok = validator(fs)
     config = config_data
-    timepairs = [["2024-12-19T18:00:00", "06:00:00"], ["2024-12-20T06:00:00", "12:00:00"]]
+    timepairs = [["2026-06-10T18:00:00", "06:00:00"], ["2026-06-11T06:00:00", "12:00:00"]]
     # With cycles+leadtimes and no timepairs (the fixture default):
     assert ok(config)
     # With timepairs and no cycles or leadtimes:
@@ -323,19 +323,17 @@ def test_schema_time_keys(logged, config_data, fs):
     assert not ok(with_del(config, S.cycles))
     assert logged("is not valid", reset=True)
     # Only timepairs with cycles (no leadtimes) is invalid:
-    config_tp = with_set(with_del(config, S.leadtimes), timepairs, S.timepairs)
-    assert not ok(config_tp)
+    assert not ok(with_set(with_del(config, S.leadtimes), timepairs, S.timepairs))
     assert logged("is not valid", reset=True)
     # Only timepairs with leadtimes (no cycles) is invalid:
-    config_tp = with_set(with_del(config, S.cycles), timepairs, S.timepairs)
-    assert not ok(config_tp)
+    assert not ok(with_set(with_del(config, S.cycles), timepairs, S.timepairs))
     assert logged("is not valid", reset=True)
 
 
 def test_schema_timepairs(logged, config_data, fs):
     ok = validator(fs)
     config = with_del(with_del(config_data, S.cycles), S.leadtimes)
-    valid = [["2024-12-19T18:00:00", "06:00:00"], ["2024-12-20T06:00:00", "12:00:00"]]
+    valid = [["2026-06-10T18:00:00", "06:00:00"], ["2026-06-11T06:00:00", "12:00:00"]]
     # Basic correctness with timepairs:
     assert ok(with_set(config, valid, S.timepairs))
     # Must be an array:
