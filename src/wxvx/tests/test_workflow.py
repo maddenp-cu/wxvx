@@ -1022,10 +1022,7 @@ def test_workflow__regrid_width(c):
 
 
 def test_workflow__stat_args(c, statkit):
-    with (
-        patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}),
-        patch.object(workflow, "gen_timecoords", return_value=[statkit.tc]),
-    ):
+    with patch.object(workflow, "_vxvars", return_value={statkit.var: statkit.varname}):
         stat_args = workflow._stat_args(
             c=c,
             varname=statkit.varname,
@@ -1034,8 +1031,9 @@ def test_workflow__stat_args(c, statkit):
             cycle=datetime(2024, 12, 19, 18, tzinfo=timezone.utc),
             leadtimes=[timedelta(hours=6)],
         )
+    tc = TimeCoords(datetime(2024, 12, 19, 18, tzinfo=timezone.utc), timedelta(hours=6))
     assert list(stat_args) == [
-        (c, statkit.varname, statkit.tc, statkit.var, statkit.prefix, statkit.source)
+        (c, statkit.varname, tc, statkit.var, statkit.prefix, statkit.source)
     ]
 
 
