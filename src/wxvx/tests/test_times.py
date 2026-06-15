@@ -7,7 +7,7 @@ from datetime import timedelta
 from pytest import mark
 
 from wxvx import times
-from wxvx.config import Cycles, Leadtimes
+from wxvx.config import Cycles, Leadtimes, Timepairs
 from wxvx.strings import S
 
 # Tests
@@ -44,6 +44,7 @@ def test_times_gen_timecoords(config_data, utc):
     actual = times.gen_timecoords(
         cycles=Cycles(raw=config_data[S.cycles]),
         leadtimes=Leadtimes(raw=config_data[S.leadtimes]),
+        timepairs=Timepairs(raw=None),
     )
     expected = [
         times.TimeCoords(cycle=utc(2024, 12, 19, 18), leadtime=0),
@@ -60,6 +61,7 @@ def test_times_gen_timecoords_truth(config_data, utc):
     actual = times.gen_timecoords_truth(
         cycles=Cycles(raw=config_data[S.cycles]),
         leadtimes=Leadtimes(raw=config_data[S.leadtimes]),
+        timepairs=Timepairs(raw=None),
     )
     expected = [
         times.TimeCoords(cycle=utc(2024, 12, 19, 18), leadtime=0),

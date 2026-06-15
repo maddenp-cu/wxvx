@@ -5,7 +5,7 @@ from itertools import product
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from wxvx.config import Cycles, Leadtimes
+    from wxvx.config import Cycles, Leadtimes, Timepairs
 
 # Public
 
@@ -35,17 +35,16 @@ class TimeCoords:
         return self.validtime.isoformat()
 
 
-def gen_timecoords(cycles: Cycles, leadtimes: Leadtimes) -> list[TimeCoords]:
-    return sorted(
-        {
-            TimeCoords(cycle=cycle, leadtime=leadtime)
-            for cycle, leadtime in product(cycles.values, leadtimes.values)
-        }
-    )
+def gen_timecoords(cycles: Cycles, leadtimes: Leadtimes, timepairs: Timepairs) -> list[TimeCoords]:
+    tp = timepairs.values or product(cycles.values, leadtimes.values)
+    return sorted({TimeCoords(cycle=cycle, leadtime=leadtime) for cycle, leadtime in tp})
 
 
-def gen_timecoords_truth(cycles: Cycles, leadtimes: Leadtimes) -> list[TimeCoords]:
-    return sorted({TimeCoords(cycle=tc.validtime) for tc in gen_timecoords(cycles, leadtimes)})
+def gen_timecoords_truth(
+    cycles: Cycles, leadtimes: Leadtimes, timepairs: Timepairs
+) -> list[TimeCoords]:
+    timecoords = gen_timecoords(cycles, leadtimes, timepairs)
+    return sorted({TimeCoords(cycle=x.validtime) for x in timecoords})
 
 
 def hh(dt: datetime) -> str:

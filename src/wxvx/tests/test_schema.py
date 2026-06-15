@@ -21,17 +21,19 @@ def test_schema(logged, config_data, fs):
     config = config_data
     # Basic correctness:
     assert ok(config)
-    # Certain top-level keys are required:
+    # Certain top-level keys are always required:
     for key in [
-        S.cycles,
         S.forecast,
-        S.leadtimes,
         S.paths,
         S.truth,
         S.variables,
     ]:
         assert not ok(with_del(config, key))
         assert logged(f"'{key}' is a required property", reset=True)
+    # Either cycles+leadtimes or timepairs is required:
+    for key in [S.cycles, S.leadtimes]:
+        assert not ok(with_del(config, key))
+        assert logged("is not valid", reset=True)
     # Additional keys are not allowed:
     assert not ok(with_set(config, 42, "n"))
     assert logged("'n' was unexpected", reset=True)
@@ -301,6 +303,61 @@ def test_schema_regrid(logged, config_data, fs):
     assert ok(with_set(config, "G004", S.to))
     assert not ok(with_set(config, "UNEXPECTED", S.to))
     assert logged("'UNEXPECTED' does not match")
+
+
+def test_schema_time_keys(logged, config_data, fs):
+    ok = validator(fs)
+    config = config_data
+    timepairs = [["2026-06-10T18:00:00", "06:00:00"], ["2026-06-11T06:00:00", "12:00:00"]]
+    # With cycles+leadtimes and no timepairs (the fixture default):
+    assert ok(config)
+    # With timepairs and no cycles or leadtimes:
+    assert ok(with_set(with_del(with_del(config, S.cycles), S.leadtimes), timepairs, S.timepairs))
+    # All three present together is invalid:
+    assert not ok(with_set(config, timepairs, S.timepairs))
+    assert logged("is not valid", reset=True)
+    # Only cycles (no leadtimes, no timepairs) is invalid:
+    assert not ok(with_del(config, S.leadtimes))
+    assert logged("is not valid", reset=True)
+    # Only leadtimes (no cycles, no timepairs) is invalid:
+    assert not ok(with_del(config, S.cycles))
+    assert logged("is not valid", reset=True)
+    # Only timepairs with cycles (no leadtimes) is invalid:
+    assert not ok(with_set(with_del(config, S.leadtimes), timepairs, S.timepairs))
+    assert logged("is not valid", reset=True)
+    # Only timepairs with leadtimes (no cycles) is invalid:
+    assert not ok(with_set(with_del(config, S.cycles), timepairs, S.timepairs))
+    assert logged("is not valid", reset=True)
+
+
+def test_schema_timepairs(logged, config_data, fs):
+    ok = validator(fs)
+    config = with_del(with_del(config_data, S.cycles), S.leadtimes)
+    valid = [["2026-06-10T18:00:00", "06:00:00"], ["2026-06-11T06:00:00", "12:00:00"]]
+    # Basic correctness with timepairs:
+    assert ok(with_set(config, valid, S.timepairs))
+    # Must be an array:
+    assert not ok(with_set(config, "foo", S.timepairs))
+    assert logged("'foo' is not of type 'array'", reset=True)
+    # Must have at least one element:
+    assert not ok(with_set(config, [], S.timepairs))
+    assert logged("should be non-empty", reset=True)
+    # Each element must be a 2-element array:
+    assert not ok(with_set(config, [["2024-12-19T18:00:00"]], S.timepairs))
+    assert logged("is too short", reset=True)
+    assert not ok(with_set(config, [["2024-12-19T18:00:00", "06:00:00", "extra"]], S.timepairs))
+    assert logged("is too long", reset=True)
+    # First element of each tuple must match datetime schema:
+    assert not ok(with_set(config, [["not-a-datetime", "06:00:00"]], S.timepairs))
+    assert logged("is not valid", reset=True)
+    # Second element of each tuple must match timedelta schema:
+    assert not ok(with_set(config, [["2024-12-19T18:00:00", "not-a-timedelta"]], S.timepairs))
+    assert logged("is not valid", reset=True)
+    # Integer values are valid for timedelta (second element):
+    assert ok(with_set(config, [["2024-12-19T18:00:00", 6]], S.timepairs))
+    # Wrong type entirely in the array:
+    assert not ok(with_set(config, [42], S.timepairs))
+    assert logged("42 is not of type 'array'")
 
 
 def test_schema_truth(logged, config_data, fs):

@@ -217,6 +217,10 @@ def test_config_Cycles():
     assert repr(x3) == "Cycles({'start': '%s', 'step': %s, 'stop': '%s'})" % (ts1, td, ts3)
 
 
+def test_config_Cycles__none():
+    assert config.Cycles(raw=None).values == []
+
+
 def test_config_Forecast(config_data, forecast):
     obj = forecast
     assert hash(obj)
@@ -270,6 +274,10 @@ def test_config_Leadtimes():
     assert config.Leadtimes(raw=["0:360", "0:480:3600", 3]).values == expected
 
 
+def test_config_Leadtimes__none():
+    assert config.Leadtimes(raw=None).values == []
+
+
 def test_config_Paths(paths, config_data):
     obj = paths
     assert obj.grids_baseline == Path(config_data[S.paths][S.grids][S.baseline])
@@ -312,6 +320,25 @@ def test_config_Time(config_data, time):
     assert obj == other1
     other2 = config.Time(**{**cfg, S.inittime: "foo"})
     assert obj != other2
+
+
+def test_config_Timepairs(utc):
+    raw: list = [["2026-06-10T18:00:00", "06:00:00"], ["2026-06-11T06:00:00", 12]]
+    obj = config.Timepairs(raw=raw)
+    expected = [
+        (utc(2026, 6, 10, 18), timedelta(hours=6)),
+        (utc(2026, 6, 11, 6), timedelta(hours=12)),
+    ]
+    assert obj.values == expected
+    assert obj == config.Timepairs(raw=raw)
+    assert obj != config.Timepairs(raw=[["2026-06-10T18:00:00", "03:00:00"]])
+    assert hash(obj)
+    assert str(obj) == repr(obj)
+    assert repr(obj) == "Timepairs(%s)" % raw
+
+
+def test_config_Timepairs__none():
+    assert config.Timepairs(raw=None).values == []
 
 
 def test_config_ToGrid():
