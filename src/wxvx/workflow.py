@@ -29,7 +29,6 @@ import xarray as xr
 from iotaa import Asset, Node, collection, external, task
 
 from wxvx import variables
-from wxvx.config import Cycles
 from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
 from wxvx.strings import MET, S
@@ -52,7 +51,7 @@ from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-
+    from datetime import timedelta
     from wxvx.config import Config
     from wxvx.variables import VarMeta
 
@@ -143,7 +142,7 @@ def ncobs(c: Config):
     yield taskname
     yield [
         _netcdf_from_obs(c, TimeCoords(tc.validtime))
-        for tc in gen_timecoords_truth(c.cycles, c.leadtimes)
+        for tc in gen_timecoords_truth(c.cycles, c.leadtimes, c.timepairs)
     ]
 
 
@@ -153,7 +152,7 @@ def obs(c: Config):
     _enforce_point_truth_type(c, taskname)
     yield taskname
     reqs = []
-    for tc in gen_timecoords_truth(c.cycles, c.leadtimes):
+    for tc in gen_timecoords_truth(c.cycles, c.leadtimes, c.timepairs):
         tc_valid = TimeCoords(tc.validtime)
         url = render(c.truth.url, tc_valid, context=c.raw)
         yyyymmdd, hh, _ = tcinfo(tc_valid)
@@ -166,8 +165,8 @@ def plots(c: Config):
     taskname = "Plots for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
     yield [
-        _plot(c, cycle, varname, level, stat, width)
-        for cycle in c.cycles.values  # noqa: PD011
+        _plot(c, cycle, leadtimes, varname, level, stat, width)
+        for cycle, leadtimes in _cycle_leadtimes_map(c).items()
         for varname, level in _varnames_levels(c)
         for stat, width in _stats_widths(c, varname)
     ]
@@ -177,12 +176,12 @@ def plots(c: Config):
 def stats(c: Config):
     taskname = "Stats database for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
-    yield [
-        _db_row(c, stat_req)
-        for varname, level in _varnames_levels(c)
-        for stat_req in _stat_reqs(c, varname, level)
-    ]
-
+    reqs: list[Node] = []
+    for varname, level in _varnames_levels(c):
+        for cycle, leadtimes in _cycle_leadtimes_map(c).items():
+            stat_reqs = _stat_reqs(c, varname, level, cycle, leadtimes)
+            reqs.extend(_db_row(c, stat_req) for stat_req in stat_reqs)
+    yield reqs
 
 # Private tasks
 
@@ -533,7 +532,13 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
 
 @task
 def _plot(
-    c: Config, cycle: datetime, varname: str, level: float | None, stat: str, width: int | None
+    c: Config,
+    cycle: datetime,
+    leadtimes: list[timedelta],
+    varname: str,
+    level: float | None,
+    stat: str,
+    width: int | None,
 ):
     varmeta = _varmeta(c, varname)
     var = _var(c, varname, level)
@@ -544,12 +549,12 @@ def _plot(
     rundir = c.paths.run / S.plots / yyyymmdd(cycle) / hh(cycle)
     path = rundir / f"{var}-{stat}{'-width-' + str(width) if width else ''}-plot.png"
     yield Asset(path, path.is_file)
-    reqs = _stat_reqs(c, varname, level, cycle)
+    reqs = _stat_reqs(c, varname, level, cycle, leadtimes)
     yield reqs
-    leadtimes = ["%03d" % (td.total_seconds() // 3600) for td in c.leadtimes.values]  # noqa: PD011
     plot_data = _prepare_plot_data(reqs, stat, width)
     hue = MET.LABEL if MET.LABEL in plot_data.columns else MET.MODEL
     w = f"(width={width}) " if width else ""
+    int_leadtimes = [int(x.total_seconds() // 3600) for x in leadtimes]
     with _PLOT_LOCK, catch_warnings():
         simplefilter("ignore")
         sns.set(style="darkgrid")
@@ -560,7 +565,7 @@ def _plot(
         )
         plt.xlabel("Leadtime")
         plt.ylabel(f"{stat} ({varmeta.units})")
-        plt.xticks(ticks=[int(lt) for lt in leadtimes], labels=leadtimes, rotation=90)
+        plt.xticks(ticks=int_leadtimes, labels=["%03d" % x for x in int_leadtimes], rotation=90)
         plt.legend(title="Model", bbox_to_anchor=(1.02, 1), loc="upper left")
         plt.figtext(0.403, 0.0, f"wxvx {version()}", fontsize=6)
         plt.tight_layout(rect=(0, 0.005, 1, 1))
@@ -690,6 +695,14 @@ def _config_fields(c: Config, varname: str, var: Var, datafmt: DataFormat):
         for x in field_fcst, field_obs:
             x[MET.cnt_thresh] = varmeta.cnt_thresh
     return field_fcst, field_obs
+
+
+def _cycle_leadtimes_map(c: Config) -> dict[datetime, list[timedelta]]:
+    timepairs = c.timepairs.values or product(c.cycles.values, c.leadtimes.values)
+    m: dict[datetime, list[timedelta]] = {}
+    for cycle, leadtime in timepairs:
+        m.setdefault(cycle, []).append(leadtime)
+    return {cycle: sorted(set(leadtimes)) for cycle, leadtimes in sorted(m.items())}
 
 
 def _enforce_point_truth_type(c: Config, taskname: str):
@@ -825,31 +838,32 @@ def _regrid_width(c: Config) -> int:
 
 
 def _stat_args(
-    c: Config, varname: str, level: float | None, source: Source, cycle: datetime | None
+    c: Config,
+    varname: str,
+    level: float | None,
+    source: Source,
+    cycle: datetime,
+    leadtimes: list[timedelta],
 ) -> Iterator:
-    if cycle:
-        start = cycle.strftime("%Y-%m-%dT%H:%M:%S")
-        step = "00:00:00"
-        stop = start
-        cycles = Cycles(dict(start=start, step=step, stop=stop))
-    else:
-        cycles = c.cycles
     sections = {Source.BASELINE: c.baseline, Source.FORECAST: c.forecast, Source.TRUTH: c.truth}
     name = cast(Named, sections[source]).name.lower()
     prefix = lambda var: "%s_%s" % (name.replace(" ", "_"), str(var).replace("-", "_"))
+    timecoords = [TimeCoords(cycle=cycle, leadtime=x) for x in leadtimes]
     args = [
         (c, vn, tc, var, prefix(var), source)
-        for (var, vn), tc in product(_vxvars(c).items(), gen_timecoords(cycles, c.leadtimes))
+        for (var, vn), tc in product(_vxvars(c).items(), timecoords)
         if vn == varname and var.level == level
     ]
     return iter(sorted(args))
 
 
 def _stat_reqs(
-    c: Config, varname: str, level: float | None, cycle: datetime | None = None
+    c: Config, varname: str, level: float | None, cycle: datetime, leadtimes: list[timedelta]
 ) -> Sequence[Node]:
     f = _stats_vs_obs if c.truth.type == TruthType.POINT else _stats_vs_grid
-    reqs_for = lambda source: [f(*args) for args in _stat_args(c, varname, level, source, cycle)]
+    reqs_for = lambda source: [
+        f(*x) for x in _stat_args(c, varname, level, source, cycle, leadtimes)
+    ]
     reqs: Sequence[Node] = reqs_for(Source.FORECAST)
     if c.baseline.name is not None:
         source = Source.TRUTH if c.baseline.name == S.truth else Source.BASELINE
@@ -888,7 +902,7 @@ def _vars_varnames_times(c: Config) -> Iterator[tuple[Var, str, TimeCoords]]:
     return iter(
         (var, varname, tc)
         for var, varname in _vxvars(c).items()
-        for tc in gen_timecoords(c.cycles, c.leadtimes)
+        for tc in gen_timecoords(c.cycles, c.leadtimes, c.timepairs)
     )
 
 
