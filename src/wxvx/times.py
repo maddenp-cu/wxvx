@@ -51,6 +51,13 @@ def hh(dt: datetime) -> str:
     return dt.strftime("%H")
 
 
+def hms(td: timedelta) -> str:
+    s = td.total_seconds()
+    h, s = s // 3600, s % 3600
+    m, s = s // 60, s % 60
+    return "%d:%02d:%02d" % (h, m, s)
+
+
 def tcinfo(tc: TimeCoords, leadtime_digits: int = 3) -> tuple[str, str, str]:
     fmt = f"%0{leadtime_digits}d"
     return (yyyymmdd(dt=tc.cycle), hh(dt=tc.cycle), fmt % (tc.leadtime.total_seconds() // 3600))

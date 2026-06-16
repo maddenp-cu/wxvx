@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
 from enum import Enum, auto
 from functools import cache
 from itertools import chain, pairwise, product
@@ -32,7 +31,7 @@ from wxvx import variables
 from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
 from wxvx.strings import MET, S
-from wxvx.times import TimeCoords, gen_timecoords, gen_timecoords_truth, hh, tcinfo, yyyymmdd
+from wxvx.times import TimeCoords, gen_timecoords, gen_timecoords_truth, hh, hms, tcinfo, yyyymmdd
 from wxvx.util import (
     LINETYPE,
     DataFormat,
@@ -51,7 +50,7 @@ from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from datetime import timedelta
+    from datetime import datetime, timedelta
 
     from wxvx.config import Config
     from wxvx.variables import VarMeta
@@ -326,19 +325,20 @@ def _db_file(path: Path):
 @task
 def _db_row(c: Config, stat_req: Node):
     meta = stat_req.ref
-    model = cast(str, (c.forecast if meta.source is Source.FORECAST else c.baseline).name)
-    cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    vardesc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
-    taskname = "Database row %s %s %s %03d" % (
-        model,
-        vardesc,
-        cyclestr,
-        meta.tc.leadtime.total_seconds() / 3600,
+    source = (
+        c.forecast
+        if meta.source is Source.FORECAST
+        else c.truth
+        if meta.source == Source.TRUTH
+        else c.baseline
     )
+    model = cast(str, source.name)
+    cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
+    vardesc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
+    leadtime = hms(meta.tc.leadtime)
+    taskname = "Database row %s %s %s %s" % (model, vardesc, cyclestr, leadtime)
     yield taskname
     cycle = meta.tc.cycle.isoformat()
-    leadtime = (epoch + meta.tc.leadtime).strftime("%H:%M:%S")
     stmt = (
         "select 1 from stats where"
         " cycle = ?"
@@ -807,7 +807,7 @@ def _met_mask(polyfile: Node | None) -> dict[str, list[str]]:
 
 def _prepare_plot_data(reqs: Sequence[Node], stat: str, width: int | None) -> pd.DataFrame:
     linetype = LINETYPE[stat]
-    files = [str(x.ref["path"]).replace(".stat", f"_{linetype}.txt") for x in reqs]
+    files = [str(x.ref.path).replace(".stat", f"_{linetype}.txt") for x in reqs]
     columns = [MET.MODEL, MET.FCST_LEAD, stat]
     if linetype in [MET.cts, MET.nbrcnt]:
         columns.append(MET.FCST_THRESH)

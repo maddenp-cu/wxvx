@@ -1022,7 +1022,7 @@ def test_workflow__met_mask__no_polyfile():
 @mark.parametrize("dictkey", ["foo", "bar", "baz"])
 def test_workflow__prepare_plot_data(dictkey):
     _, _, dfs, stat, width = TESTDATA[dictkey]
-    node = lambda x: Mock(ref={"path": f"{x}.stat"}, taskname=x)
+    node = lambda x: Mock(ref=ns(path=f"{x}.stat"), taskname=x)
     reqs = cast(Sequence[Node], [node("node1"), node("node2")])
     with patch.object(workflow.pd, "read_csv", side_effect=dfs):
         tdf = workflow._prepare_plot_data(reqs=reqs, stat=stat, width=width)
