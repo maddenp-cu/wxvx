@@ -133,10 +133,13 @@ def test_workflow_grids_truth(c, ngrids, noop, truth_type):
         assert len(workflow.grids_truth(c=c).ref) == expected
 
 
-def test_workflow_metstats(c, noop):
-    with patch.object(workflow, "_stat_reqs", return_value=[noop()]) as _stat_reqs:
-        node = workflow.metstats(c=c)
-    assert len(node.ref) == len(c.variables) + 1  # for 2x SPFH levels
+def test_workflow_metstats(c):
+    #   2 sources (forecast and baseline)
+    # x 2 cycles
+    # x 3 leadtimes
+    # x 5 varlevels (gh, refc, 2t x 1 level + q x 2 levels)
+    # = 60 MET stat runs
+    assert len(workflow.metstats(c=c).ref) == 60
 
 
 def test_workflow_ncobs(c, obs_info):
@@ -155,15 +158,6 @@ def test_workflow_plots(c, noop):
     assert len(node.ref) == len(c.cycles.values) * sum(
         len(list(workflow._stats_widths(c, varname))) for varname, _ in workflow._varnames_levels(c)
     )
-
-
-def test_workflow_stats(c):
-    #   2 sources (forecast and baseline)
-    # x 2 cycles
-    # x 3 leadtimes
-    # x 5 varlevels (gh, refc, 2t x 1 level + q x 2 levels)
-    # = 60 stat runs
-    assert len(workflow.stats(c=c).ref) == 60
 
 
 @mark.parametrize("source", [Source.FORECAST, Source.TRUTH])

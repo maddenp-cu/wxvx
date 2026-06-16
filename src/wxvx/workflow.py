@@ -52,6 +52,7 @@ from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from datetime import timedelta
+
     from wxvx.config import Config
     from wxvx.variables import VarMeta
 
@@ -131,7 +132,8 @@ def metstats(c: Config):
     yield taskname
     reqs: list[Node] = []
     for varname, level in _varnames_levels(c):
-        reqs.extend(_stat_reqs(c, varname, level))
+        for cycle, leadtimes in _cycle_leadtimes_map(c).items():
+            reqs.extend(_stat_reqs(c, varname, level, cycle, leadtimes))
     yield reqs
 
 
@@ -182,6 +184,7 @@ def stats(c: Config):
             stat_reqs = _stat_reqs(c, varname, level, cycle, leadtimes)
             reqs.extend(_db_row(c, stat_req) for stat_req in stat_reqs)
     yield reqs
+
 
 # Private tasks
 
