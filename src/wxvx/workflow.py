@@ -324,6 +324,10 @@ def _db_file(path: Path):
 
 @task
 def _db_row(c: Config, stat_req: Node):
+    txtfiles = set()
+    for stat, _ in _stats_widths(c, stat_req.ref.varname):
+        linetype = LINETYPE[stat]
+        txtfiles.add(str(stat_req.ref.path).replace(".stat", f"_{linetype}.txt"))
     meta = stat_req.ref
     source = (
         c.forecast
@@ -360,19 +364,19 @@ def _db_row(c: Config, stat_req: Node):
     ready = lambda: dbcon.ready and not pd.read_sql(sql=stmt, con=dbcon.ref[0], params=params).empty
     yield Asset(None, ready)
     yield [dbcon, stat_req]
-    txtfile = str(meta.path).replace(".stat", "_cnt.txt")
-    df = pd.read_csv(txtfile, sep=r"\s+")
-    df = df.drop(columns=["SI_BCL.1"])
-    custom_fields = {
-        "cycle": cycle,
-        "leadtime": leadtime,
-        "level": meta.var.level,
-        "leveltype": meta.var.level_type,
-        "validtime": meta.tc.validtime,
-        "varname": meta.var.name,
-    }
-    df = df.assign(**custom_fields)
-    df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
+    for txtfile in txtfiles:
+        df = pd.read_csv(txtfile, sep=r"\s+")
+        df = df.drop(columns=["SI_BCL.1"])
+        custom_fields = {
+            "cycle": cycle,
+            "leadtime": leadtime,
+            "level": meta.var.level,
+            "leveltype": meta.var.level_type,
+            "validtime": meta.tc.validtime,
+            "varname": meta.var.name,
+        }
+        df = df.assign(**custom_fields)
+        df.to_sql(name="stats", con=dbcon.ref[0], if_exists="append", index=False)
 
 
 @external
