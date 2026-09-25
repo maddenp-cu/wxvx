@@ -30,7 +30,7 @@
       "types-PyYAML",
       "types-requests",
       "types-seaborn",
-      "uwtools >=2.14.0",
+      "uwtools >=2.21.0",
       "xarray >=2025.12",
       "zarr >=2.18,<3.3"
     ],
@@ -45,7 +45,7 @@
       "pyyaml ==6.0.*",
       "requests >=2.32,<2.35",
       "seaborn ==0.13.*",
-      "uwtools >=2.14.0",
+      "uwtools >=2.21.0",
       "xarray >=2025.12",
       "zarr >=2.18,<3.3"
     ]
