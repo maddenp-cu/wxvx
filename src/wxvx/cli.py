@@ -46,7 +46,7 @@ def main() -> None:
             logging.info("Using %s threads", args.threads)
         initialize_pool(args.threads)
         initialize_session(args.threads)
-        node = task(c, threads=args.threads)
+        node = task(c, iotaa=dict(threads=args.threads))
         if args.fail and not node.ready:
             fail(f"Task '{args.task}' is incomplete")
     except WXVXError as e:

@@ -728,7 +728,7 @@ def test_workflow__stats_vs_grid(c, datafmt, fakefs, mask, source, tc, testvars)
     )
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=testvars[EC.t2], prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = taskfunc(**kwargs, dry_run=True).ref
+        stat = taskfunc(**kwargs, iotaa=dict(dry_run=True)).ref
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
@@ -766,7 +766,7 @@ def test_workflow__stats_vs_obs(c, datafmt, fakefs, mask, source, tc, testvars):
         c.forecast._mask = None
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=var, prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref
+        stat = workflow._stats_vs_obs(**kwargs, iotaa=dict(dry_run=True)).ref
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
