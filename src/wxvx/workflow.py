@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from enum import Enum, auto
 from functools import cache
@@ -11,6 +14,7 @@ from pathlib import Path
 from stat import S_IEXEC
 from textwrap import dedent
 from threading import Lock
+from types import SimpleNamespace as ns
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import urlparse
 from warnings import catch_warnings, simplefilter
@@ -29,7 +33,7 @@ from wxvx import variables
 from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
 from wxvx.strings import MET, S
-from wxvx.times import TimeCoords, gen_timecoords, gen_timecoords_truth, hh, tcinfo, yyyymmdd
+from wxvx.times import TimeCoords, gen_timecoords, gen_timecoords_truth, hh, hms, tcinfo, yyyymmdd
 from wxvx.util import (
     LINETYPE,
     DataFormat,
@@ -41,6 +45,7 @@ from wxvx.util import (
     classify_url,
     mpexec,
     render,
+    resource,
     version,
 )
 from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, metlevel
@@ -123,6 +128,17 @@ def grids_truth(c: Config):
 
 
 @collection
+def metstats(c: Config):
+    taskname = "MET stats for %s vs %s" % (c.forecast.name, c.truth.name)
+    yield taskname
+    reqs: list[Node] = []
+    for varname, level in _varnames_levels(c):
+        for cycle, leadtimes in _cycle_leadtimes_map(c).items():
+            reqs.extend(_stat_reqs(c, varname, level, cycle, leadtimes))
+    yield reqs
+
+
+@collection
 def ncobs(c: Config):
     taskname = "Truth netCDF from obs for %s" % c.truth.name
     _enforce_point_truth_type(c, taskname)
@@ -161,12 +177,18 @@ def plots(c: Config):
 
 @collection
 def stats(c: Config):
-    taskname = "Stats for %s vs %s" % (c.forecast.name, c.truth.name)
+    taskname = "Stats database for %s vs %s" % (c.forecast.name, c.truth.name)
     yield taskname
     reqs: list[Node] = []
     for varname, level in _varnames_levels(c):
         for cycle, leadtimes in _cycle_leadtimes_map(c).items():
-            reqs.extend(_stat_reqs(c, varname, level, cycle, leadtimes))
+            for stat_req in _stat_reqs(c, varname, level, cycle, leadtimes):
+                meta = stat_req.ref[S.stat]
+                reqs.extend(
+                    _db_import(c, meta, linetype, stat_req.ref[linetype], stat_req)
+                    for linetype in stat_req.ref
+                    if linetype != S.stat
+                )
     yield reqs
 
 
@@ -189,7 +211,7 @@ def _config_grid_stat(
     yield Asset(path, path.is_file)
     yield None
     field_fcst, field_obs = _config_fields(c, varname, var, datafmt)
-    meta = _meta(c, varname)
+    varmeta = _varmeta(c, varname)
     config = {
         MET.fcst: {MET.field: [field_fcst]},
         MET.mask: _met_mask(polyfile),
@@ -197,13 +219,13 @@ def _config_grid_stat(
         MET.nc_pairs_flag: {MET.climo: MET.FALSE, MET.raw: MET.FALSE} if c.ncdiffs else MET.FALSE,
         MET.obs: {MET.field: [field_obs]},
         MET.obtype: c.truth.name,
-        MET.output_flag: dict.fromkeys(sorted({LINETYPE[x] for x in meta.met_stats}), MET.BOTH),
+        MET.output_flag: dict.fromkeys(sorted({LINETYPE[x] for x in varmeta.met_stats}), MET.BOTH),
         MET.output_prefix: f"{prefix}",
         MET.regrid: {MET.method: c.regrid.method, MET.to_grid: c.regrid.to},
         MET.tmp_dir: path.parent,
     }
     if nbrhd := {
-        k: v for k, v in [(MET.shape, meta.nbrhd_shape), (MET.width, meta.nbrhd_width)] if v
+        k: v for k, v in [(MET.shape, varmeta.nbrhd_shape), (MET.width, varmeta.nbrhd_width)] if v
     }:
         config[MET.nbrhd] = nbrhd
     with atomic(path) as tmp:
@@ -279,6 +301,91 @@ def _config_point_stat(
     }
     with atomic(path) as tmp:
         tmp.write_text("%s\n" % render_metconf(config))
+
+
+@task
+def _db_file(path: Path):
+    yield "Database file %s" % path
+    yield Asset(path, path.is_file)
+    yield None
+    colmaps = json.loads(resource("columns.json"))
+    colinfo = {**colmaps["wxvx"], **colmaps["met"]}
+    colstr = ", ".join(f"{k} {v}" for k, v in colinfo.items())
+    stmt = "create table stats (id integer primary key autoincrement, %s)"
+    with atomic(path) as tmp:
+        con = sqlite3.connect(tmp)
+        con.execute(stmt % colstr)
+        con.close()
+
+
+@task
+def _db_import(c: Config, meta: ns, linetype: str, txtfile: Path, stat_req: Node):
+    source = (
+        c.forecast
+        if meta.source is Source.FORECAST
+        else c.truth
+        if meta.source == Source.TRUTH
+        else c.baseline
+    )
+    model = cast(str, source.name)
+    cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
+    vardesc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
+    leadtime = hms(meta.tc.leadtime)
+    taskname = "Database import of MET %s statistics %s %s %s %s" % (
+        linetype.upper(),
+        model,
+        vardesc,
+        cyclestr,
+        leadtime,
+    )
+    yield taskname
+    cycle = meta.tc.cycle.isoformat()
+    stmt = (
+        "select 1 from stats where"
+        " cycle = ?"
+        " and leadtime = ?"
+        " and level is ?"
+        " and leveltype = ?"
+        " and LINE_TYPE = ?"
+        " and model = ?"
+        " and varname = ?"
+    )
+    params = (
+        cycle,
+        leadtime,
+        meta.var.level,
+        meta.var.level_type,
+        linetype.upper(),
+        model,
+        meta.var.name,
+    )
+    dbfile = _db_file(c.paths.run / "wxvx.db")
+
+    def ready() -> bool:
+        if not dbfile.ready:
+            return False
+        with closing(sqlite3.connect(dbfile.ref)) as con:
+            return not pd.read_sql(sql=stmt, con=con, params=params).empty
+
+    yield Asset(None, ready)
+    yield [dbfile, stat_req]
+    df = pd.read_csv(txtfile, sep=r"\s+")
+    # MET may write duplicate SI_BCL headers instead of SI_BCL and SI_BCU.
+    # pandas renames the duplicate SI_BCL.1. Remove when present.
+    # MET Issue: https://github.com/dtcenter/MET/issues/2730
+    df = df.drop(columns=["MODEL", "SI_BCL.1"], errors="ignore")
+    custom_fields = {
+        "cycle": cycle,
+        "leadtime": leadtime,
+        "level": meta.var.level,
+        "leveltype": meta.var.level_type,
+        "model": model,
+        "validtime": meta.tc.validtime,
+        "varname": meta.var.name,
+    }
+    df = df.assign(**custom_fields)
+    with closing(sqlite3.connect(dbfile.ref)) as con, con:
+        df.to_sql(name="stats", con=con, if_exists="append", index=False)
 
 
 @external
@@ -449,9 +556,9 @@ def _plot(
     stat: str,
     width: int | None,
 ):
-    meta = _meta(c, varname)
+    varmeta = _varmeta(c, varname)
     var = _var(c, varname, level)
-    desc = meta.description.format(level=var.level)
+    desc = varmeta.description.format(level=var.level)
     cyclestr = f"{yyyymmdd(cycle)} {hh(cycle)}Z"
     taskname = f"Plot {desc}{' width ' + str(width) if width else ''} {stat} at {cyclestr}"
     yield taskname
@@ -473,7 +580,7 @@ def _plot(
             "%s %s %s%s vs %s at %s" % (desc, stat, w, c.forecast.name, c.truth.name, cyclestr)
         )
         plt.xlabel("Leadtime")
-        plt.ylabel(f"{stat} ({meta.units})")
+        plt.ylabel(f"{stat} ({varmeta.units})")
         plt.xticks(ticks=int_leadtimes, labels=["%03d" % x for x in int_leadtimes], rotation=90)
         plt.legend(title="Model", bbox_to_anchor=(1.02, 1), loc="upper left")
         plt.figtext(0.403, 0.0, f"wxvx {version()}", fontsize=6)
@@ -503,7 +610,9 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     template = "grid_stat_%s_%02d0000L_%s_%s0000V.stat"
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
-    yield Asset(path, path.is_file)
+    varmeta = _varmeta(c, varname)
+    linetypes = sorted({LINETYPE[x] for x in varmeta.met_stats})
+    yield _stat_assets(path, linetypes, source=source, tc=tc, var=var, varname=varname)
     if source == Source.FORECAST:
         location = Path(render(c.forecast.path, tc, context=c.raw))
         fcst, datafmt = _forecast_grid(location, c, varname, tc, var)
@@ -542,7 +651,7 @@ def _stats_vs_obs(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: str
     template = "point_stat_%s_%02d0000L_%s_%s0000V.stat"
     yyyymmdd_valid, hh_valid, _ = tcinfo(TimeCoords(tc.validtime))
     path = rundir / (template % (prefix, int(leadtime), yyyymmdd_valid, hh_valid))
-    yield Asset(path, path.is_file)
+    yield _stat_assets(path, [MET.cnt], source=source, tc=tc, var=var, varname=varname)
     obs = _netcdf_from_obs(c, TimeCoords(tc.validtime))
     reqs: list[Node] = [obs]
     if source is Source.FORECAST:
@@ -606,13 +715,13 @@ def _config_fields(c: Config, varname: str, var: Var, datafmt: DataFormat):
     if datafmt != DataFormat.GRIB:
         field_fcst[MET.set_attr_level] = level_obs
     field_obs = {S.level: [level_obs], S.name: varname_truth}
-    meta = _meta(c, varname)
-    if meta.cat_thresh:
+    varmeta = _varmeta(c, varname)
+    if varmeta.cat_thresh:
         for x in field_fcst, field_obs:
-            x[MET.cat_thresh] = meta.cat_thresh
-    if meta.cnt_thresh:
+            x[MET.cat_thresh] = varmeta.cat_thresh
+    if varmeta.cnt_thresh:
         for x in field_fcst, field_obs:
-            x[MET.cnt_thresh] = meta.cnt_thresh
+            x[MET.cnt_thresh] = varmeta.cnt_thresh
     return field_fcst, field_obs
 
 
@@ -721,13 +830,9 @@ def _met_mask(polyfile: Node | None) -> dict[str, list[str]]:
     }
 
 
-def _meta(c: Config, varname: str) -> VarMeta:
-    return VARMETA[c.variables[varname][S.name]]
-
-
 def _prepare_plot_data(reqs: Sequence[Node], stat: str, width: int | None) -> pd.DataFrame:
     linetype = LINETYPE[stat]
-    files = [str(x.ref).replace(".stat", f"_{linetype}.txt") for x in reqs]
+    files = [str(x.ref[linetype]) for x in reqs]
     columns = [MET.MODEL, MET.FCST_LEAD, stat]
     if linetype in [MET.cts, MET.nbrcnt]:
         columns.append(MET.FCST_THRESH)
@@ -780,6 +885,17 @@ def _stat_args(
     return iter(sorted(args))
 
 
+def _stat_assets(
+    path: Path, linetypes: Sequence[str], source: Source, tc: TimeCoords, var: Var, varname: str
+) -> dict[str, Asset]:
+    txt = lambda linetype: path.parent / f"{path.stem}_{linetype}.txt"
+    meta = ns(path=path, source=source, tc=tc, var=var, varname=varname)
+    return {
+        S.stat: Asset(meta, path.is_file),
+        **{linetype: Asset(txt(linetype), txt(linetype).is_file) for linetype in linetypes},
+    }
+
+
 def _stat_reqs(
     c: Config, varname: str, level: float | None, cycle: datetime, leadtimes: list[timedelta]
 ) -> Sequence[Node]:
@@ -795,18 +911,22 @@ def _stat_reqs(
 
 
 def _stats_widths(c: Config, varname) -> Iterator[tuple[str, int | None]]:
-    meta = _meta(c, varname)
+    varmeta = _varmeta(c, varname)
     return chain.from_iterable(
-        ((stat, width) for width in (meta.nbrhd_width or []))
+        ((stat, width) for width in (varmeta.nbrhd_width or []))
         if LINETYPE[stat] == MET.nbrcnt
         else [(stat, None)]
-        for stat in meta.met_stats
+        for stat in varmeta.met_stats
     )
 
 
 def _var(c: Config, varname: str, level: float | None) -> Var:
-    m = _meta(c, varname)
-    return Var(m.name, m.level_type, level)
+    varmeta = _varmeta(c, varname)
+    return Var(varmeta.name, varmeta.level_type, level)
+
+
+def _varmeta(c: Config, varname: str) -> VarMeta:
+    return VARMETA[c.variables[varname][S.name]]
 
 
 def _varnames_levels(c: Config) -> Iterator[tuple[str, float | None]]:

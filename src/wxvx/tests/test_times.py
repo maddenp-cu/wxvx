@@ -78,6 +78,13 @@ def test_times_hh(utc):
     assert times.hh(utc(2025, 1, 30, 18)) == "18"
 
 
+def test_times_hms():
+    assert times.hms(timedelta(hours=6)) == "6:00:00"
+    assert times.hms(timedelta(hours=0)) == "0:00:00"
+    assert times.hms(timedelta(hours=12, minutes=30, seconds=45)) == "12:30:45"
+    assert times.hms(timedelta(hours=100)) == "100:00:00"
+
+
 def test_times_tcinfo(utc):
     cycle = utc(2025, 2, 11, 3)
     leadtime = timedelta(hours=8)

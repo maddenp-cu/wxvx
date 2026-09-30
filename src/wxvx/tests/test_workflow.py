@@ -3,6 +3,7 @@ Tests for wxvx.workflow.
 """
 
 import os
+import sqlite3
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -22,7 +23,7 @@ from wxvx.config import Config, _force
 from wxvx.strings import EC, MET, NOAA, S
 from wxvx.tests.support import with_del
 from wxvx.times import TimeCoords, gen_timecoords, tcinfo
-from wxvx.util import DataFormat, TruthType, WXVXError, resource_path
+from wxvx.util import LINETYPE, DataFormat, TruthType, WXVXError, resource_path
 from wxvx.variables import Var
 
 Source = workflow.Source
@@ -133,6 +134,21 @@ def test_workflow_grids_truth(c, ngrids, noop, truth_type):
         assert len(workflow.grids_truth(c=c).ref) == expected
 
 
+def test_workflow_metstats(c):
+    #   2 sources (forecast and baseline)
+    # x 2 cycles
+    # x 3 leadtimes
+    # x 5 varlevels (gh, refc, 2t x 1 level + q x 2 levels)
+    # = 60 MET stat runs
+    # Each run yields 1 .stat + n linetype .txt assets per unique linetype:
+    #   gh:   cnt         -> 2 assets
+    #   refc: cts, nbrcnt -> 3 assets
+    #   q:    cnt         -> 2 assets (x2 levels)
+    #   2t:   cnt         -> 2 assets
+    # = 12 x (2 + 3 + 2 + 2 + 2) = 132 assets
+    assert len(workflow.metstats(c=c).ref) == 132
+
+
 def test_workflow_ncobs(c, obs_info):
     c, expected = obs_info
     assert workflow.ncobs(c).ref == [x.with_suffix(".nc") for x in expected]
@@ -151,13 +167,17 @@ def test_workflow_plots(c, noop):
     )
 
 
-def test_workflow_stats(c):
-    #   2 sources (forecast and baseline)
-    # x 2 cycles
-    # x 3 leadtimes
-    # x 5 varlevels (gh, refc, 2t x 1 level + q x 2 levels)
-    # = 60 stat runs
-    assert len(workflow.stats(c=c).ref) == 60
+def test_workflow_stats(c, noop):
+    with patch.object(workflow, "_db_import", noop):
+        node = workflow.stats(c=c)
+    # 60 stat runs, each yielding one _db_import per linetype:
+    #   gh:   cnt         -> 1
+    #   refc: cts, nbrcnt -> 2
+    #   q:    cnt         -> 1 (x2 levels)
+    #   2t:   cnt         -> 1
+    # Per source/cycle/leadtime: (1 + 2 + 1 + 1 + 1) = 6 linetypes
+    # x 2 sources x 2 cycles x 3 leadtimes = 72 _db_import nodes
+    assert len(node.ref) == 72
 
 
 @mark.parametrize("source", [Source.FORECAST, Source.TRUTH])
@@ -472,6 +492,58 @@ def test_workflow__cycle_leadtimes_map__timepairs_dedup(config_data, fakefs, gen
     assert workflow._cycle_leadtimes_map(c) == expected
 
 
+def test_workflow__db_file(tmp_path):
+    path = tmp_path / "wxvx.db"
+    assert not path.is_file()
+    node = workflow._db_file(path=path)
+    assert node.ready
+    assert path.is_file()
+    con = sqlite3.connect(path)
+    cur = con.execute("pragma table_info(stats)")
+    columns = {row[1]: row[2] for row in cur.fetchall()}
+    con.close()
+    expected_wxvx = {"cycle", "leadtime", "level", "leveltype", "model", "validtime", "varname"}
+    expected_met = {"RMSE", "PODY", "FSS", "FCST_LEAD", "TOTAL", "VERSION"}
+    assert expected_wxvx | expected_met <= set(columns)
+
+
+def test_workflow__db_import(c_real_fs):
+    c = c_real_fs
+    tc = TimeCoords(cycle=datetime(1970, 1, 1, tzinfo=timezone.utc), leadtime=timedelta(hours=6))
+    var = Var(NOAA.T2M, "heightAboveGround", 2)
+    meta = ns(source=Source.FORECAST, tc=tc, var=var, varname=NOAA.T2M)
+    txtfile = c.paths.run / "point_stat_foo_060000L_19700101_060000V_cnt.txt"
+    txtfile.parent.mkdir(parents=True, exist_ok=True)
+    txtfile.write_text(
+        "VERSION MODEL FCST_LEAD LINE_TYPE TOTAL ME RMSE SI_BCL SI_BCL.1\n"
+        "V12.0 ForecastModel 60000 CNT 100 0.5 1.2 0.1 0.1\n"
+    )
+
+    @external
+    def mock_stat_req():
+        yield "mock"
+        yield Asset(None, lambda: True)
+
+    stat_req = mock_stat_req()
+    node = workflow._db_import(c=c, meta=meta, linetype=MET.cnt, txtfile=txtfile, stat_req=stat_req)
+    assert node.ready
+    dbpath = c.paths.run / "wxvx.db"
+    con = sqlite3.connect(dbpath)
+    rows = con.execute("select * from stats").fetchall()
+    assert len(rows) == 1
+    cols = [desc[0] for desc in con.execute("select * from stats").description]
+    row = dict(zip(cols, rows[0], strict=True))
+    assert row["cycle"] == "1970-01-01T00:00:00"
+    assert row["leadtime"] == "6:00:00"
+    assert row["level"] == 2
+    assert row["leveltype"] == "heightAboveGround"
+    assert row["model"] == "Forecast Model"
+    assert row["varname"] == NOAA.T2M
+    assert row["LINE_TYPE"] == "CNT"
+    assert row["ME"] == 0.5
+    con.close()
+
+
 def test_workflow__existing(fakefs):
     path = fakefs / S.forecast
     assert not workflow._existing(path=path).ready
@@ -728,7 +800,10 @@ def test_workflow__stats_vs_grid(c, datafmt, fakefs, mask, source, tc, testvars)
     )
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=testvars[EC.t2], prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = taskfunc(**kwargs, dry_run=True).ref
+        refs = taskfunc(**kwargs, dry_run=True).ref
+        assert S.stat in refs
+        assert MET.cnt in refs
+        stat = refs[S.stat].path
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
@@ -766,7 +841,10 @@ def test_workflow__stats_vs_obs(c, datafmt, fakefs, mask, source, tc, testvars):
         c.forecast._mask = None
     kwargs = dict(c=c, varname=NOAA.T2M, tc=tc, var=var, prefix="foo", source=source)
     with patch.object(workflow, "classify_data_format", return_value=datafmt):
-        stat = workflow._stats_vs_obs(**kwargs, dry_run=True).ref
+        refs = workflow._stats_vs_obs(**kwargs, dry_run=True).ref
+        assert S.stat in refs
+        assert MET.cnt in refs
+        stat = refs[S.stat].path
         cfgfile = stat.with_suffix(".config")
         runscript = stat.with_suffix(".sh")
         assert not stat.is_file()
@@ -1041,16 +1119,11 @@ def test_workflow__met_mask__no_polyfile():
     assert workflow._met_mask(polyfile=polyfile) == expected
 
 
-def test_workflow__meta(c):
-    meta = workflow._meta(c=c, varname=NOAA.HGT)
-    assert meta.cf_standard_name == "geopotential_height"
-    assert meta.level_type == S.isobaricInhPa
-
-
 @mark.parametrize("dictkey", ["foo", "bar", "baz"])
 def test_workflow__prepare_plot_data(dictkey):
     _, _, dfs, stat, width = TESTDATA[dictkey]
-    node = lambda x: Mock(ref=f"{x}.stat", taskname=x)
+    linetype = LINETYPE[stat]
+    node = lambda x: Mock(ref={linetype: f"{x}_{linetype}.txt"}, taskname=x)
     reqs = cast(Sequence[Node], [node("node1"), node("node2")])
     with patch.object(workflow.pd, "read_csv", side_effect=dfs):
         tdf = workflow._prepare_plot_data(reqs=reqs, stat=stat, width=width)
@@ -1107,6 +1180,29 @@ def test_workflow__stat_args(c, statkit, utc):
     ]
 
 
+def test_workflow__stat_assets(tmp_path):
+    path = tmp_path / "grid_stat_foo_060000L_19700101_000000V.stat"
+    linetypes = [MET.cnt, MET.nbrcnt]
+    tc = TimeCoords(cycle=datetime(1970, 1, 1, tzinfo=timezone.utc), leadtime=timedelta(hours=6))
+    var = Var("t2", "heightAboveGround", 2)
+    assets = workflow._stat_assets(
+        path=path, linetypes=linetypes, source=Source.FORECAST, tc=tc, var=var, varname="TMP"
+    )
+    assert set(assets) == {S.stat, MET.cnt, MET.nbrcnt}
+    assert assets[S.stat].ref.path == path
+    assert assets[S.stat].ref.source is Source.FORECAST
+    assert assets[S.stat].ref.varname == "TMP"
+    assert assets[MET.cnt].ref == tmp_path / "grid_stat_foo_060000L_19700101_000000V_cnt.txt"
+    assert assets[MET.nbrcnt].ref == tmp_path / "grid_stat_foo_060000L_19700101_000000V_nbrcnt.txt"
+    assert not assets[S.stat].ready()
+    assert not assets[MET.cnt].ready()
+    path.touch()
+    assert assets[S.stat].ready()
+    assert not assets[MET.cnt].ready()
+    assets[MET.cnt].ref.touch()
+    assert assets[MET.cnt].ready()
+
+
 @mark.parametrize("baseline_name", [S.HRRR, S.truth, None])
 def test_workflow__stat_reqs(baseline_name, c, statkit, utc):
     c.baseline = replace(
@@ -1151,6 +1247,12 @@ def test_workflow__stats_widths(c):
 
 def test_workflow__var(c, testvars):
     assert workflow._var(c=c, varname=NOAA.HGT, level=900) == testvars[EC.gh]
+
+
+def test_workflow__varmeta(c):
+    meta = workflow._varmeta(c=c, varname=NOAA.HGT)
+    assert meta.cf_standard_name == "geopotential_height"
+    assert meta.level_type == S.isobaricInhPa
 
 
 def test_workflow__varnames_levels(c):

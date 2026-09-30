@@ -124,6 +124,7 @@ def test_cli_main__task_list(caplog, switch, tidy):
           grids_baseline
           grids_forecast
           grids_truth
+          metstats
           ncobs
           obs
           plots
