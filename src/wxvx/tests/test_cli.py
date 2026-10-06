@@ -38,7 +38,7 @@ def test_cli_main(config_data, logged, switch_c, switch_n, switch_t, threads, tm
         cli.main()
     _parse_args.assert_called_once_with(argv)
     use_uwtools_logger.assert_called_once_with(verbose=False)
-    plots.assert_called_once_with(Config(config_data), threads=threads)
+    plots.assert_called_once_with(Config(config_data), iotaa=dict(threads=threads))
     if threads > 1:
         assert logged("Using %s threads" % threads)
     else:
