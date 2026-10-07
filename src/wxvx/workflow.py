@@ -327,38 +327,38 @@ def _db_import(c: Config, meta: ns, linetype: str, txtfile: Path, stat_req: Node
         if meta.source == Source.TRUTH
         else c.baseline
     )
-    model = cast(str, source.name)
+    modelname = cast(str, source.name)
     cyclestr = f"{yyyymmdd(meta.tc.cycle)} {hh(meta.tc.cycle)}Z"
     vardesc = _varmeta(c, meta.varname).description.format(level=meta.var.level)
     leadtime = hms(meta.tc.leadtime)
     taskname = "Database import of MET %s statistics %s %s %s %s" % (
         linetype.upper(),
-        model,
+        modelname,
         vardesc,
         cyclestr,
         leadtime,
     )
     yield taskname
     cycle = meta.tc.cycle.isoformat()
-    stmt = (
-        "select 1 from stats where"
-        " cycle = ?"
-        " and leadtime = ?"
-        " and level is ?"
-        " and leveltype = ?"
-        " and LINE_TYPE = ?"
-        " and model = ?"
-        " and varname = ?"
-    )
-    params = (
-        cycle,
-        leadtime,
-        meta.var.level,
-        meta.var.level_type,
-        linetype.upper(),
-        model,
-        meta.var.name,
-    )
+    stmt = """
+    select 1 from stats
+    where cycle = :cycle
+    and leadtime = :leadtime
+    and level is :level
+    and leveltype = :leveltype
+    and modelname = :modelname
+    and varname = :varname
+    and LINE_TYPE = :line_type
+    """
+    params = {
+        "cycle": cycle,
+        "leadtime": leadtime,
+        "level": meta.var.level,
+        "leveltype": meta.var.level_type,
+        "line_type": linetype.upper(),
+        "modelname": modelname,
+        "varname": meta.var.name,
+    }
     dbfile = _db_file(c.paths.run / "wxvx.db")
 
     def ready() -> bool:
@@ -370,16 +370,12 @@ def _db_import(c: Config, meta: ns, linetype: str, txtfile: Path, stat_req: Node
     yield Asset(None, ready)
     yield [dbfile, stat_req]
     df = pd.read_csv(txtfile, sep=r"\s+")
-    # MET may write duplicate SI_BCL headers instead of SI_BCL and SI_BCU.
-    # pandas renames the duplicate SI_BCL.1. Remove when present.
-    # MET Issue: https://github.com/dtcenter/MET/issues/2730
-    df = df.drop(columns=["MODEL", "SI_BCL.1"], errors="ignore")
     custom_fields = {
         "cycle": cycle,
         "leadtime": leadtime,
         "level": meta.var.level,
         "leveltype": meta.var.level_type,
-        "model": model,
+        "modelname": modelname,
         "validtime": meta.tc.validtime,
         "varname": meta.var.name,
     }
@@ -499,7 +495,7 @@ def _grid_nc(c: Config, varname: str, tc: TimeCoords, var: Var):
     da = da_construct(c, src)
     ds = ds_construct(c, da, taskname, var.level)
     with atomic(path) as tmp:
-        ds.to_netcdf(tmp, encoding={varname: {"zlib": True, "complevel": 9}})
+        ds.to_netcdf(tmp, encoding={varname: {"zlib": True, "complevel": 9}}, engine="h5netcdf")
     logging.info("%s: Wrote %s", taskname, path)
 
 
@@ -811,7 +807,10 @@ def _maybe_polyfile(c: Config, reqs: list[Node], statpath: Path) -> Node | None:
             path = Path(mask)
             if not path.is_file():
                 logging.debug("Mask %s not found, checking MET masks", path)
-                metmask = Path(os.environ["MET_DATA"], "poly", mask)
+                if not (met_base := os.environ.get("MET_BASE")):
+                    msg = "Mask %s not found, and MET_BASE is not set to locate MET masks" % mask
+                    raise WXVXError(msg)
+                metmask = Path(met_base, "poly", mask)
                 if metmask.is_file():
                     logging.debug("Using MET mask %s", metmask)
                     path = metmask

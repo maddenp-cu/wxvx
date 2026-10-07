@@ -419,11 +419,14 @@ def model_class(name: str) -> Any:
 
 @cache
 def model_names(current: type = Var) -> set[str]:
-    s = set()
-    for subclass in current.__subclasses__():
-        s.add(subclass.__name__)
-        s |= model_names(subclass)
-    return s
+    def names(cls: type[object]) -> set[str]:
+        s = set()
+        for subclass in cls.__subclasses__():
+            s.add(subclass.__name__)
+            s |= names(subclass)
+        return s
+
+    return names(current)
 
 
 # Private

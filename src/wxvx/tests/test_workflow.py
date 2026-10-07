@@ -502,7 +502,7 @@ def test_workflow__db_file(tmp_path):
     cur = con.execute("pragma table_info(stats)")
     columns = {row[1]: row[2] for row in cur.fetchall()}
     con.close()
-    expected_wxvx = {"cycle", "leadtime", "level", "leveltype", "model", "validtime", "varname"}
+    expected_wxvx = {"cycle", "leadtime", "level", "leveltype", "modelname", "validtime", "varname"}
     expected_met = {"RMSE", "PODY", "FSS", "FCST_LEAD", "TOTAL", "VERSION"}
     assert expected_wxvx | expected_met <= set(columns)
 
@@ -515,8 +515,8 @@ def test_workflow__db_import(c_real_fs):
     txtfile = c.paths.run / "point_stat_foo_060000L_19700101_060000V_cnt.txt"
     txtfile.parent.mkdir(parents=True, exist_ok=True)
     txtfile.write_text(
-        "VERSION MODEL FCST_LEAD LINE_TYPE TOTAL ME RMSE SI_BCL SI_BCL.1\n"
-        "V12.0 ForecastModel 60000 CNT 100 0.5 1.2 0.1 0.1\n"
+        "VERSION MODEL FCST_LEAD LINE_TYPE TOTAL ME RMSE SI_BCL SI_BCU\n"
+        "V12.0 Forecast_Model 60000 CNT 100 0.5 1.2 0.1 0.2\n"
     )
 
     @external
@@ -537,10 +537,13 @@ def test_workflow__db_import(c_real_fs):
     assert row["leadtime"] == "6:00:00"
     assert row["level"] == 2
     assert row["leveltype"] == "heightAboveGround"
-    assert row["model"] == "Forecast Model"
+    assert row["modelname"] == "Forecast Model"
     assert row["varname"] == NOAA.T2M
     assert row["LINE_TYPE"] == "CNT"
+    assert row["MODEL"] == "Forecast_Model"
     assert row["ME"] == 0.5
+    assert row["SI_BCL"] == 0.1
+    assert row["SI_BCU"] == 0.2
     con.close()
 
 
@@ -1067,7 +1070,7 @@ def test_workflow__maybe_polyfile__mask_str(c, fakefs):
 
 
 def test_workflow__maybe_polyfile__mask_str_met(c, fs, logged):
-    d = Path(os.environ["MET_DATA"], "poly")
+    d = Path(os.environ["MET_BASE"], "poly")
     fs.add_real_directory(d)
     name = "CONUS.poly"
     c.forecast._mask = name
@@ -1081,8 +1084,18 @@ def test_workflow__maybe_polyfile__mask_str_met(c, fs, logged):
     assert logged("Using MET mask %s" % path)
 
 
+def test_workflow__maybe_polyfile__mask_str_met_base_unset(c, fakefs):
+    name = "CONUS.poly"
+    c.forecast._mask = name
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        raises(WXVXError, match="Mask %s not found, and MET_BASE is not set" % name),
+    ):
+        workflow._maybe_polyfile(c=c, reqs=[], statpath=fakefs / "unused")
+
+
 def test_workflow__maybe_polyfile__mask_str_met_missing(c, fs, logged):
-    d = Path(os.environ["MET_DATA"], "poly")
+    d = Path(os.environ["MET_BASE"], "poly")
     fs.add_real_directory(d)
     name = "MISSING.poly"
     c.forecast._mask = name

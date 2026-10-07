@@ -149,6 +149,7 @@
     "ME_BCU": "REAL",
     "ME_NCL": "REAL",
     "ME_NCU": "REAL",
+    "MODEL": "TEXT",
     "MSE": "REAL",
     "MSESS": "REAL",
     "MSESS_BCL": "REAL",
@@ -229,6 +230,7 @@
     "SEDS_NCU": "REAL",
     "SI": "REAL",
     "SI_BCL": "REAL",
+    "SI_BCU": "REAL",
     "SP_CORR": "REAL",
     "TOTAL": "INTEGER",
     "UFSS": "REAL",
@@ -242,7 +244,7 @@
     "leadtime": "TEXT",
     "level": "REAL",
     "leveltype": "TEXT",
-    "model": "TEXT",
+    "modelname": "TEXT",
     "validtime": "TEXT",
     "varname": "TEXT"
   }

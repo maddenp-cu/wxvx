@@ -159,7 +159,7 @@ If this optional value is omitted, `wxvx` will introspect forecast datasets to d
 This optional value can be one of
 
 - A sequence of latitude/longitude pairs describing a masking polygon (see the [Example](#example)), or
-- A path to a built-in MET mask file relative to `$MET_DATA/poly/` (e.g. `CONUS.poly` or `NCEP_masks/CONUS_mask.nc`), or
+- A path to a built-in MET mask file relative to `$MET_BASE/poly/` (e.g. `CONUS.poly` or `NCEP_masks/CONUS_mask.nc`), or
 - A path to an arbitrary `.poly` or `.nc` mask file.
 
 The specified mask will be applied to forecast, baseline, or truth grids before verification.
@@ -438,14 +438,14 @@ Invoking `wxvx -c config.yaml -t grids_truth` would stage the truth grids to dis
 
 ### Statistics Database
 
-The `stats` task creates a SQLite database at `paths.run/wxvx.db` and imports statistics produced by the `metstats` task into its `stats` table. The table includes columns from the MET output supported by `wxvx`, with null values for fields that do not apply to a particular line type. It also includes `wxvx` metadata columns: `cycle`, `leadtime`, `level`, `leveltype`, `model`, `validtime`, and `varname`.
+The `stats` task creates a SQLite database at `paths.run/wxvx.db` and imports statistics produced by the `metstats` task into its `stats` table. The table includes columns from the MET output supported by `wxvx`, with null values for fields that do not apply to a particular line type. It also includes `wxvx` metadata columns: `cycle`, `leadtime`, `level`, `leveltype`, `modelname`, `validtime`, and `varname`.
 
-Repeated invocations of `stats` do not reimport records that have the same cycle, leadtime, level, level type, model, variable, and MET `LINE_TYPE`.
+Repeated invocations of `stats` do not reimport records that have the same cycle, leadtime, level, level type, model name, variable, and MET `LINE_TYPE`.
 
-For example, summarize available model, cycle, leadtime, and variable combinations with:
+For example, summarize available model name, cycle, leadtime, and variable combinations with:
 
 ``` bash
-sqlite3 paths.run/wxvx.db 'select model, cycle, leadtime, varname, count(*) as records from stats group by model, cycle, leadtime, varname;'
+sqlite3 paths.run/wxvx.db 'select modelname, cycle, leadtime, varname, count(*) as records from stats group by modelname, cycle, leadtime, varname;'
 ```
 
 ## Miscellaneous
