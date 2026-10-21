@@ -277,19 +277,49 @@ The truth dataset to verify forecast (and, optionally, the baseline) data, again
 
 ### truth.name
 
-Name of the truth to verify against. Currently supported values are: `GFS`, `HRRR`, `PREPBUFR`. This value guides `wxvx` in identification of truth data (grids or obs) corresponding to the forecast variable being verified. This name will also appear in MET stat output. This name must differ from `forecast.name`.
+Name of the truth to verify against. Currently supported values are: `GDAS`, `GFS`, `HRRR`, `STAGEIV`, `PREPBUFR`. This value guides `wxvx` in identification of truth data (grids or obs) corresponding to the forecast variable being verified. This name will also appear in MET stat output. This name must differ from `forecast.name`.
 
 ### truth.type
 
 One of `grid` or `point`.
 
-* For `grid`, `url` should point to GRIB data. Supported `name` are: `GDAS`, `GFS`, `HRRR`.
+* For `grid`, `url` should point to GRIB data. Supported `name` values are: `GDAS`, `GFS`, `HRRR`, `STAGEIV`.
 
 * For `point`, `url` should point to PREPBUFR data, `name` should be `PREPBUFR`, and `regrid.to` must not be `truth`.
 
 ### truth.url
 
 Specifies the location of truth data. Values may be local-filesystem paths (optionally prefixed with `file://`) or HTTP URLs prefixed with `http://` or `https://` and may contain Jinja2 [expressions](#expressions).
+
+NCEP distributes Stage IV CONUS precipitation in GRIB2 format through [NOMADS](https://nomads.ncep.noaa.gov/pub/data/nccf/com/pcpanl/prod/). Configure `truth.url` with the hourly Stage IV file template. For each forecast valid time, `wxvx` retrieves the six one-hour accumulations ending at that time and runs MET's `pcp_combine` to create the six-hour truth accumulation used by `grid_stat`:
+
+``` yaml
+truth:
+  name: STAGEIV
+  type: grid
+  url: https://nomads.ncep.noaa.gov/pub/data/nccf/com/pcpanl/prod/pcpanl.{{ yyyymmdd }}/st4_conus.{{ yyyymmdd }}{{ hh }}.01h.grb2
+variables:
+  APCP:
+    level_type: surface
+    name: tp
+```
+
+The template may also point to hourly files staged locally. For example, a six-hour verification ending at 09Z uses the files ending at 04Z through 09Z:
+
+``` yaml
+truth:
+  name: STAGEIV
+  type: grid
+  url: "{{ meta.stageiv }}/st4_conus.{{ yyyymmdd }}{{ hh }}.01h.grb2"
+variables:
+  APCP:
+    level_type: surface
+    name: tp
+```
+
+The file timestamp is interpreted as the ending valid time of each hourly accumulation; forecast cycles and leadtimes remain controlled by the caller. `pcp_combine` writes the combined `APCP` field at accumulation level `A006`, which `wxvx` selects in the generated `grid_stat` configuration. NOMADS retains a limited window of production data, so older verification periods require data from an archive or files already staged locally.
+
+The `grids_truth` task stages the raw hourly Stage IV files without running `pcp_combine`. This allows data to be downloaded on an internet-connected node before `metstats` is run elsewhere. When required, `metstats` runs `pcp_combine` through a separate NetCDF-generation task; files already staged by `grids_truth` are reused without downloading them again.
 
 ### variables
 
@@ -403,6 +433,9 @@ truth:
   type: grid
   url: https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{{ yyyymmdd }}/conus/hrrr.t{{ hh }}z.wrfprsf{{ "%02d" % fh }}.grib2
 variables:
+  APCP:
+    level_type: surface
+    name: tp
   HGT:
     level_type: isobaricInhPa
     levels: *levels
@@ -430,7 +463,9 @@ It will be verified against `HRRR` analysis as truth, which can be found in GRIB
 
 Variable grids extracted from truth datasets will be written to `/path/to/workdir/truth`, forecast dataset to `/path/to/workdir/forecast`, and run output to `/path/to/workdir/run`. The [Jinja2](https://jinja.palletsprojects.com/en/stable/) expressions inside `{{ }}` markers will be processed by [`uwtools`](https://uwtools.readthedocs.io/en/stable/) and may use any features it supports.
 
-Three variables -- geopotential height, composite reflectivity, and 2-meter temperature, will be verified. The keys under `variables` map the names of the variables as they appear in the forecast dataset to a canonical description of the variable using ECMWF variable names and level-type descriptions (see the notes in the _Configuration_ section for links). (Note that some variables do not support a "level" concept.) The full verification task-graph will comprise: cycles x leadtimes x variables x levels.
+Four variables -- accumulated total precipitation, geopotential height, composite reflectivity, and 2-meter temperature, will be verified. The keys under `variables` map the names of the variables as they appear in the forecast dataset to a canonical description of the variable using ECMWF variable names and level-type descriptions (see the notes in the _Configuration_ section for links). (Note that some variables do not support a "level" concept.) The full verification task-graph will comprise: cycles x leadtimes x variables x levels.
+
+Accumulated total precipitation uses the CF standard name `precipitation_amount` and units `kg m-2`, matching the HRRRCast, HRRR, and Stage IV GRIB2 fields used for testing. For liquid water, 1 kg m-2 is equivalent to 1 mm. It is verified against six-hour accumulated truth using FSS at neighborhood widths 3, 5, and 11, plus CSI and HSS, for thresholds of 1, 5, 10, and 25 kg m-2.
 
 Finally, because `baseline.name` is set to `truth`, `HRRR` forecasts with validtimes matching those of the `ML` model's forecasts will be verified against `HRRR` analysis, producing MET statistics. If the `plots` task is requested, the `ML` and `HRRR` stats will be plotted together.
 

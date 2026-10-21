@@ -6,11 +6,12 @@ import os
 import re
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from functools import cache
 from itertools import chain, pairwise, product
 from pathlib import Path
+from shlex import quote
 from stat import S_IEXEC
 from textwrap import dedent
 from threading import Lock
@@ -32,7 +33,7 @@ from iotaa import Asset, Node, collection, external, task
 from wxvx import variables
 from wxvx.metconf import render as render_metconf
 from wxvx.net import fetch
-from wxvx.strings import MET, S
+from wxvx.strings import EC, MET, S
 from wxvx.times import TimeCoords, gen_timecoords, gen_timecoords_truth, hh, hms, tcinfo, yyyymmdd
 from wxvx.util import (
     LINETYPE,
@@ -52,7 +53,6 @@ from wxvx.variables import VARMETA, Var, da_construct, da_select, ds_construct, 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from datetime import timedelta
 
     from wxvx.config import Config
     from wxvx.variables import VarMeta
@@ -118,10 +118,16 @@ def grids_forecast(c: Config):
 def grids_truth(c: Config):
     yield "Truth grids for %s" % c.truth.name
     if c.truth.type is TruthType.GRID:
-        reqs = [
-            _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var, Source.TRUTH)
-            for var, _, tc in _vars_varnames_times(c)
-        ]
+        reqs = []
+        for var, _, tc in _vars_varnames_times(c):
+            truth_tc = _truth_timecoords(c, tc, var)
+            if c.truth.name == S.STAGEIV:
+                if var.name != EC.tp:
+                    logging.error("Stage IV truth does not provide variable %s", var.name)
+                    continue
+                reqs.extend(_stageiv_files(c, truth_tc, var))
+            else:
+                reqs.append(_grid_grib(c, truth_tc, var, Source.TRUTH))
     else:
         reqs = None
     yield reqs
@@ -425,6 +431,10 @@ def _grib_index_data_wgrib2(c: Config, outdir: Path, tc: TimeCoords, url: str):
             firstbyte=int(this_record[1]),
             lastbyte=int(next_record[1]) - 1,
         )
+        if truth_var.name == EC.tp and not _matches_accumulation_period(
+            this_record, timedelta(hours=VARMETA[truth_var.name].accumulation_hours)
+        ):
+            continue
         if truth_var in vxvars:
             idxdata[str(truth_var)] = truth_var
 
@@ -444,7 +454,13 @@ def _grib_index_file_eccodes(c: Config, grib_path: Path, tc: TimeCoords, source:
     yield Asset(path, path.is_file)
     yield [_timegate(c.timegate, tc.validtime), _existing(grib_path)]
     # Keep index creation here in-sync with index selection in _grid_grib_from_local.
-    keys = [f"{S.shortName}:s", f"{S.typeOfLevel}:s", f"{S.level}:l"]
+    keys = [
+        f"{S.shortName}:s",
+        f"{S.typeOfLevel}:s",
+        f"{S.level}:l",
+        f"{S.startStep}:l",
+        f"{S.endStep}:l",
+    ]
     with _EC_LOCK:
         iid = ec.codes_index_new_from_file(str(grib_path), keys)
         logging.debug("%s: Opened %s as %s", taskname, grib_path, iid)
@@ -471,7 +487,7 @@ def _grid_grib(c: Config, tc: TimeCoords, var: Var, source: Source):
         assert isinstance(url, Path)
         idxfile = _grib_index_file_eccodes(c, url, tc, source)
         yield idxfile
-        _grid_grib_from_local(path, idxfile.ref, var, taskname)
+        _grid_grib_from_local(path, idxfile.ref, var, source=source, tc=tc, taskname=taskname)
     else:
         assert isinstance(url, str)
         idxdata = _grib_index_data_wgrib2(c, outdir, tc, url=f"{url}.idx")
@@ -543,6 +559,34 @@ def _netcdf_from_obs(c: Config, tc: TimeCoords):
 
 
 @task
+def _netcdf_from_stageiv(c: Config, tc: TimeCoords, var: Var):
+    yyyymmdd, hh, leadtime = tcinfo(tc)
+    outdir = c.paths.grids_truth / yyyymmdd / hh / leadtime
+    path = outdir / f"{var}.nc"
+    taskname = "netCDF from Stage IV %s" % path
+    yield taskname
+    yield Asset(path, path.is_file)
+    hourly_files = _stageiv_files(c, tc, var)
+    yield hourly_files
+
+    rundir = c.paths.run / "pcp_combine" / yyyymmdd / hh / leadtime
+    runscript = rundir / f"{var}.sh"
+    with atomic(path) as tmp:
+        inputs = " ".join(quote(str(node.ref.resolve())) for node in hourly_files)
+        content = """
+        export OMP_NUM_THREADS=1
+        exec time pcp_combine -add {inputs} {output} \\
+          -field 'name="APCP"; level="A1";' -name APCP >{log} 2>&1
+        """.format(
+            inputs=inputs,
+            output=quote(str(tmp)),
+            log=quote(f"{path.stem}.log"),
+        )
+        _write_runscript(runscript, content)
+        mpexec(_bash(runscript), rundir, taskname)
+
+
+@task
 def _plot(
     c: Config,
     cycle: datetime,
@@ -576,7 +620,7 @@ def _plot(
             "%s %s %s%s vs %s at %s" % (desc, stat, w, c.forecast.name, c.truth.name, cyclestr)
         )
         plt.xlabel("Leadtime")
-        plt.ylabel(f"{stat} ({varmeta.units})")
+        plt.ylabel(_stat_ylabel(varmeta, stat))
         plt.xticks(ticks=int_leadtimes, labels=["%03d" % x for x in int_leadtimes], rotation=90)
         plt.legend(title="Model", bbox_to_anchor=(1.02, 1), loc="upper left")
         plt.figtext(0.403, 0.0, f"wxvx {version()}", fontsize=6)
@@ -615,7 +659,7 @@ def _stats_vs_grid(c: Config, varname: str, tc: TimeCoords, var: Var, prefix: st
     else:
         fcst = _grid_grib(c, tc, var, source)
         datafmt = DataFormat.GRIB
-    obs = _grid_grib(c, TimeCoords(cycle=tc.validtime, leadtime=0), var, Source.TRUTH)
+    obs = _truth_grid(c, _truth_timecoords(c, tc, var), var)
     reqs = [fcst, obs]
     path_config = path.with_suffix(".config")
     polyfile = _maybe_polyfile(c, reqs, path)
@@ -701,15 +745,17 @@ def _bash(runscript: Path) -> str:
 
 
 def _config_fields(c: Config, varname: str, var: Var, datafmt: DataFormat):
-    level_obs = metlevel(var.level_type, var.level)
+    level_fcst = metlevel(var.level_type, var.level)
     varname_truth = variables.model_class(c.truth.name).varname(var.name)
-    assert datafmt != DataFormat.UNKNOWN
-    level_fcst, name_fcst = (
-        (level_obs, varname_truth) if datafmt == DataFormat.GRIB else ("(0,0,*,*)", varname)
+    level_obs = (
+        metlevel(var.level_type, var.level, VARMETA[var.name].accumulation_hours)
+        if c.truth.name == S.STAGEIV and var.name == EC.tp
+        else level_fcst
     )
-    field_fcst = {S.level: [level_fcst], S.name: name_fcst}
+    assert datafmt != DataFormat.UNKNOWN
+    field_fcst = {S.level: [level_fcst], S.name: varname_truth}
     if datafmt != DataFormat.GRIB:
-        field_fcst[MET.set_attr_level] = level_obs
+        field_fcst.update({S.level: ["(0,0,*,*)"], S.name: varname, MET.set_attr_level: level_fcst})
     field_obs = {S.level: [level_obs], S.name: varname_truth}
     varmeta = _varmeta(c, varname)
     if varmeta.cat_thresh:
@@ -760,7 +806,9 @@ def _grid_grib_gridsdir_template(c: Config, source: Source) -> tuple[Path, str]:
     return c.paths.grids_truth, c.truth.url
 
 
-def _grid_grib_from_local(path: Path, idxfile: Path, var: Var, taskname: str) -> None:
+def _grid_grib_from_local(
+    path: Path, idxfile: Path, var: Var, *, source: Source, tc: TimeCoords, taskname: str
+) -> None:
     # See https://github.com/dtcenter/METplus/discussions/3252 for background on why it's
     # necessary to extract the grid to a single-message GRIB file instead of pointing MET
     # at the complete local GRIB file.
@@ -770,9 +818,13 @@ def _grid_grib_from_local(path: Path, idxfile: Path, var: Var, taskname: str) ->
         ec.codes_index_select_string(iid, "shortName", var.name)
         ec.codes_index_select_string(iid, "typeOfLevel", var.level_type)
         ec.codes_index_select_long(iid, "level", int(var.level) if var.level else 0)
+        start_step, end_step = _start_and_end_steps(iid, source, tc, var)
         gids = []
-        while gid := ec.codes_new_from_index(iid):
-            gids.append(gid)
+        if start_step is not None and end_step is not None:
+            ec.codes_index_select_long(iid, S.startStep, start_step)
+            ec.codes_index_select_long(iid, S.endStep, end_step)
+            while gid := ec.codes_new_from_index(iid):
+                gids.append(gid)
         if gids:
             if len(gids) > 1:
                 msg = "%s: %d GRIB messages matched %s in %s"
@@ -822,6 +874,17 @@ def _maybe_polyfile(c: Config, reqs: list[Node], statpath: Path) -> Node | None:
     return None
 
 
+def _matches_accumulation_period(record: Sequence[str], leadtime: timedelta) -> bool:
+    if len(record) < 6:
+        return False
+    match = re.fullmatch(r"(\d+)-(\d+) (hour|day) acc fcst", record[5])
+    if not match:
+        return False
+    start, end = (int(match.group(i)) for i in (1, 2))
+    scale = 24 if match.group(3) == "day" else 1
+    return start == 0 and end * scale == int(leadtime.total_seconds() / 3600)
+
+
 def _met_mask(polyfile: Node | None) -> dict[str, list[str]]:
     return {
         MET.grid: [] if polyfile else [MET.FULL],
@@ -862,6 +925,37 @@ def _regrid_width(c: Config) -> int:
     except KeyError as e:
         msg = "Could not determine 'width' value for regrid method '%s'" % c.regrid.method
         raise WXVXError(msg) from e
+
+
+def _stageiv_file(c: Config, tc: TimeCoords) -> Node:
+    url = render(c.truth.url, tc, context=c.raw)
+    proximity, source = classify_url(url)
+    if proximity is Proximity.LOCAL:
+        assert isinstance(source, Path)
+        return _existing(source)
+    assert isinstance(source, str)
+    yyyymmdd, hh, leadtime = tcinfo(tc)
+    outdir = c.paths.grids_truth / yyyymmdd / hh / leadtime
+    return _local_file_from_http(outdir, source, "Stage IV hourly file", c.timegate, tc.validtime)
+
+
+def _stageiv_files(c: Config, tc: TimeCoords, var: Var) -> list[Node]:
+    hours = VARMETA[var.name].accumulation_hours
+    times = [TimeCoords(tc.validtime - timedelta(hours=x)) for x in reversed(range(hours))]
+    return [_stageiv_file(c, hourly_tc) for hourly_tc in times]
+
+
+def _start_and_end_steps(
+    iid: int, source: Source, tc: TimeCoords, var: Var
+) -> tuple[int | None, int | None]:
+    forecast_hour = int(tc.leadtime.total_seconds() / 3600)
+    if var.name != EC.tp:
+        return forecast_hour, forecast_hour
+    end_step = forecast_hour if source is Source.FORECAST else VARMETA[var.name].accumulation_hours
+    valid_start_steps = (0, end_step) if source is Source.FORECAST else (0,)
+    available_start_steps = ec.codes_index_get_long(iid, S.startStep)
+    start_step = next((x for x in valid_start_steps if x in available_start_steps), None)
+    return (start_step, end_step) if start_step is not None else (None, None)
 
 
 def _stat_args(
@@ -909,6 +1003,10 @@ def _stat_reqs(
     return reqs
 
 
+def _stat_ylabel(meta: VarMeta, stat: str) -> str:
+    return f"{stat} ({meta.units})" if LINETYPE[stat] == MET.cnt else stat
+
+
 def _stats_widths(c: Config, varname) -> Iterator[tuple[str, int | None]]:
     varmeta = _varmeta(c, varname)
     return chain.from_iterable(
@@ -917,6 +1015,21 @@ def _stats_widths(c: Config, varname) -> Iterator[tuple[str, int | None]]:
         else [(stat, None)]
         for stat in varmeta.met_stats
     )
+
+
+def _truth_grid(c: Config, tc: TimeCoords, var: Var) -> Node:
+    if c.truth.name == S.STAGEIV and var.name == EC.tp:
+        return _netcdf_from_stageiv(c, tc, var)
+    return _grid_grib(c, tc, var, Source.TRUTH)
+
+
+def _truth_timecoords(c: Config, tc: TimeCoords, var: Var) -> TimeCoords:
+    # Accumulation duration is variable metadata, while the offset used to locate truth data is a
+    # source convention. Stage IV files are named for the ending valid time (zero offset); other
+    # gridded sources represent accumulations as forecast-like fields whose cycles begin them.
+    accumulation = timedelta(hours=VARMETA[var.name].accumulation_hours)
+    source_offset = timedelta() if c.truth.name == S.STAGEIV else accumulation
+    return TimeCoords(cycle=tc.validtime - source_offset, leadtime=source_offset)
 
 
 def _var(c: Config, varname: str, level: float | None) -> Var:

@@ -11,7 +11,8 @@ from typing import Any, cast
 from wxvx.strings import MET, S
 from wxvx.util import DataFormat, ToGridVal, TruthType, WXVXError, expand, to_datetime, to_timedelta
 
-_TRUTH_NAMES_GRID = (S.GDAS, S.GFS, S.HRRR)
+_BASELINE_NAMES_GRID = (S.GDAS, S.GFS, S.HRRR)
+_TRUTH_NAMES_GRID = (*_BASELINE_NAMES_GRID, S.STAGEIV)
 _TRUTH_NAMES_POINT = (S.PREPBUFR,)
 _TRUTH_NAMES = tuple(sorted([*_TRUTH_NAMES_GRID, *_TRUTH_NAMES_POINT]))
 
@@ -30,7 +31,7 @@ class Baseline:
 
     def __post_init__(self):
         # Handle 'name':
-        names = [*_TRUTH_NAMES_GRID, S.truth, None]
+        names = [*_BASELINE_NAMES_GRID, S.truth, None]
         if self.name not in names:
             strnames = [str(name) for name in names]
             raise WXVXError("Set baseline.name to one of: %s" % ", ".join(strnames))

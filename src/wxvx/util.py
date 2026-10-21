@@ -61,7 +61,9 @@ class TruthType(Enum):
 
 
 LINETYPE = {
+    MET.CSI: MET.cts,
     MET.FSS: MET.nbrcnt,
+    MET.HSS: MET.cts,
     MET.ME: MET.cnt,
     MET.PODY: MET.cts,
     MET.RMSE: MET.cnt,

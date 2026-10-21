@@ -36,6 +36,7 @@ class VarMeta:
     cnt_thresh: list[str] | None = None
     nbrhd_shape: str | None = None
     nbrhd_width: list[int] | None = None
+    accumulation_hours: int = 0
 
     def __post_init__(self):
         assert self.cf_standard_name
@@ -61,6 +62,9 @@ class VarMeta:
                     assert v is None or v in (MET.CIRCLE, MET.SQUARE)
                 case MET.nbrhd_width:
                     assert v is None or (v and all(isinstance(x, int) for x in v))
+                case "accumulation_hours":
+                    assert isinstance(v, int)
+                    assert v >= 0
 
 
 UNKNOWN = "unknown"
@@ -68,6 +72,18 @@ UNKNOWN = "unknown"
 VARMETA = {
     x.name: x
     for x in [  # blocks ordered by description
+        VarMeta(
+            description="Accumulated Total Precipitation",
+            cat_thresh=[">=1", ">=5", ">=10", ">=25"],
+            cf_standard_name="precipitation_amount",
+            level_type=S.surface,
+            met_stats=[MET.FSS, MET.CSI, MET.HSS],
+            name=EC.tp,
+            nbrhd_shape=MET.CIRCLE,
+            nbrhd_width=[3, 5, 11],
+            accumulation_hours=6,
+            units="kg m-2",
+        ),
         VarMeta(
             description="2m Temperature",
             cf_standard_name="air_temperature",
@@ -235,6 +251,7 @@ class GFS(Var):
             EC.sp: NOAA.PRES,
             EC.t2: NOAA.TMP,
             EC.t: NOAA.TMP,
+            EC.tp: NOAA.APCP,
             EC.u10: NOAA.UGRD,
             EC.u: NOAA.UGRD,
             EC.v10: NOAA.VGRD,
@@ -245,6 +262,7 @@ class GFS(Var):
     @staticmethod
     def _canonicalize(name: str, level_type: str) -> str:
         return {
+            (NOAA.APCP, S.surface): EC.tp,
             (NOAA.HGT, S.isobaricInhPa): EC.gh,
             (NOAA.PRES, S.surface): EC.sp,
             (NOAA.PRMSL, S.meanSea): EC.prmsl,
@@ -296,6 +314,20 @@ class HRRR(GFS):
             S.proj: "lcc",
         }
     )
+
+
+class STAGEIV(GFS):
+    """
+    NOAA/NCEP Stage IV quantitative precipitation estimates.
+    """
+
+    @staticmethod
+    def varname(name: str) -> str:
+        return NOAA.APCP if name == EC.tp else UNKNOWN
+
+    @staticmethod
+    def _canonicalize(name: str, level_type: str) -> str:
+        return EC.tp if (name, level_type) == (NOAA.APCP, S.surface) else UNKNOWN
 
 
 class PREPBUFR(GFS):
@@ -396,7 +428,9 @@ def ds_construct(c: Config, da: xr.DataArray, taskname: str, level: float | None
     )
 
 
-def metlevel(level_type: str, level: float | None) -> str:
+def metlevel(level_type: str, level: float | None, accumulation: int | None = None) -> str:
+    if accumulation is not None:
+        return f"A{accumulation:03d}"
     try:
         prefix = {
             S.atmosphere: "L",

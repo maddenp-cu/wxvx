@@ -78,6 +78,8 @@ def test_config_Baseline(baseline, config_data):
     with raises(WXVXError) as e:
         config.Baseline(name="anything-else")
     assert str(e.value).startswith("Set baseline.name to one of:")
+    with raises(WXVXError):
+        config.Baseline(name=S.STAGEIV, url="http://some.url")
 
 
 @mark.parametrize(S.baseline, [True, False])
@@ -371,6 +373,7 @@ def test_config_Truth(config_data, truth, truth_type):
     assert obj == other1
     other2 = config.Truth(**{**cfg, S.name: S.HRRR})
     assert obj != other2
+    assert config.Truth(**{**cfg, S.name: S.STAGEIV}).name == S.STAGEIV
 
 
 @mark.parametrize(

@@ -49,6 +49,9 @@ truth:
   type: grid
   url: https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{{ yyyymmdd }}/conus/hrrr.t{{ hh }}z.wrfprsf{{ "%02d" % fh }}.grib2
 variables:
+#  APCP: # requires a Stage IV truth.url value
+#    level_type: surface
+#    name: tp
   HGT:
     level_type: isobaricInhPa
     levels: *levels

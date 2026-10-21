@@ -34,6 +34,7 @@ class _EC(_ValsMatchKeys):
     sp: str = _
     t2: str = "2t"
     t: str = _
+    tp: str = _
     u10: str = "10u"
     u: str = _
     v10: str = "10v"
@@ -54,6 +55,7 @@ class _MET(_ValsMatchKeys):
     FALSE: str = _
     FCST_LEAD: str = _
     FCST_THRESH: str = _
+    CSI: str = _
     FSS: str = _
     FULL: str = _
     INTERP_PNTS: str = _
@@ -61,6 +63,7 @@ class _MET(_ValsMatchKeys):
     ME: str = _
     MODEL: str = _
     NEAREST: str = _
+    HSS: str = _
     PODY: str = _
     RMSE: str = _
     SFC: str = _
@@ -120,6 +123,7 @@ class _NOAA(_ValsMatchKeys):
     Strings defined by NOAA.
     """
 
+    APCP: str = _
     HGT: str = _
     PRES: str = _
     PRMSL: str = _
@@ -143,11 +147,13 @@ class _S(_ValsMatchKeys):
     HRRR: str = _
     OBS: str = _
     PREPBUFR: str = _
+    STAGEIV: str = _
     atmosphere: str = _
     baseline: str = _
     coords: str = _
     cycle: str = _
     cycles: str = _
+    endStep: str = _
     env: str = _
     fh: str = _
     firstbyte: str = _
@@ -191,6 +197,7 @@ class _S(_ValsMatchKeys):
     session: str = _
     shortName: str = _
     start: str = _
+    startStep: str = _
     stat: str = _
     stats: str = _
     step: str = _

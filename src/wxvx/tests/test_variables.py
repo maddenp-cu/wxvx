@@ -36,13 +36,14 @@ def test_variables_VarMeta():
         cnt_thresh=[">15"],
         description="Composite Reflectivity",
         level_type=S.atmosphere,
-        met_stats=[MET.FSS, MET.PODY],
+        met_stats=[MET.FSS, MET.CSI, MET.HSS, MET.PODY],
         name=EC.refc,
         nbrhd_shape=MET.CIRCLE,
         nbrhd_width=[3, 5, 11],
         units="dBZ",
     )
     x = variables.VarMeta(**kwargs)
+    assert x.accumulation_hours == 0
     for k, v in kwargs.items():
         assert getattr(x, k) == v
     for k, v in kwargs.items():
@@ -55,6 +56,16 @@ def test_variables_VarMeta():
         (MET.nbrhd_shape, "TRIANGLE"),
     ]:
         fails(k, v)
+    for value in (-1, "6"):
+        with raises(AssertionError):
+            variables.VarMeta(**{**kwargs, "accumulation_hours": value})
+
+
+def test_variables_VarMeta__tp():
+    meta = variables.VARMETA[EC.tp]
+    assert meta.accumulation_hours == 6
+    assert meta.cf_standard_name == "precipitation_amount"
+    assert meta.units == "kg m-2"
 
 
 @mark.parametrize(S.level_type, [S.atmosphere, S.meanSea, S.surface])
@@ -101,7 +112,13 @@ def test_variables_HRRR():
 
 
 @mark.parametrize(
-    (S.name, "expected"), [(EC.t, NOAA.TMP), (EC.t2, NOAA.TMP), ("foo", variables.UNKNOWN)]
+    (S.name, "expected"),
+    [
+        (EC.tp, NOAA.APCP),
+        (EC.t, NOAA.TMP),
+        (EC.t2, NOAA.TMP),
+        ("foo", variables.UNKNOWN),
+    ],
 )
 def test_variables_HRRR_varname(name, expected):
     assert variables.HRRR.varname(name=name) == expected
@@ -110,6 +127,7 @@ def test_variables_HRRR_varname(name, expected):
 @mark.parametrize(
     (S.name, S.level_type, "expected"),
     [
+        (NOAA.APCP, S.surface, EC.tp),
         (NOAA.TMP, S.isobaricInhPa, EC.t),
         (NOAA.TMP, S.heightAboveGround, EC.t2),
         ("FOO", "suface", variables.UNKNOWN),
@@ -117,6 +135,27 @@ def test_variables_HRRR_varname(name, expected):
 )
 def test_variables_HRRR__canonicalize(name, level_type, expected):
     assert variables.HRRR._canonicalize(name=name, level_type=level_type) == expected
+
+
+@mark.parametrize(
+    (S.name, "expected"),
+    [(EC.tp, NOAA.APCP), (EC.t2, variables.UNKNOWN)],
+)
+def test_variables_STAGEIV_varname(name, expected):
+    # Stage IV provides only the tp variable.
+    assert variables.STAGEIV.varname(name=name) == expected
+
+
+@mark.parametrize(
+    (S.name, S.level_type, "expected"),
+    [
+        (NOAA.APCP, S.surface, EC.tp),
+        (NOAA.APCP, S.isobaricInhPa, variables.UNKNOWN),
+        (NOAA.TMP, S.surface, variables.UNKNOWN),
+    ],
+)
+def test_variables_STAGEIV__canonicalize(name, level_type, expected):
+    assert variables.STAGEIV._canonicalize(name=name, level_type=level_type) == expected
 
 
 @mark.parametrize(
@@ -242,15 +281,19 @@ def test_variables_ds_construct__lcc(c, check_cf_metadata):
 
 
 @mark.parametrize(
-    (S.level_type, S.level, "expected"),
+    (S.level_type, S.level, "accumulation", "expected"),
     [
-        (S.atmosphere, None, "L000"),
-        (S.heightAboveGround, "2", "Z002"),
-        (S.isobaricInhPa, "900", "P900"),
+        (S.surface, None, 6, "A006"),
+        (S.atmosphere, None, None, "L000"),
+        (S.heightAboveGround, "2", None, "Z002"),
+        (S.isobaricInhPa, "900", None, "P900"),
     ],
 )
-def test_variables_metlevel(level_type, level, expected):
-    assert variables.metlevel(level_type=level_type, level=level) == expected
+def test_variables_metlevel(level_type, level, accumulation, expected):
+    assert (
+        variables.metlevel(level_type=level_type, level=level, accumulation=accumulation)
+        == expected
+    )
 
 
 def test_variables_metlevel__error():
@@ -260,7 +303,13 @@ def test_variables_metlevel__error():
 
 
 @mark.parametrize(
-    ("name", "obj"), [(S.GFS, variables.GFS), (S.HRRR, variables.HRRR), ("FOO", None)]
+    ("name", "obj"),
+    [
+        (S.GFS, variables.GFS),
+        (S.HRRR, variables.HRRR),
+        (S.STAGEIV, variables.STAGEIV),
+        ("FOO", None),
+    ],
 )
 def test_variables_model_class(name, obj):
     if obj is None:
@@ -280,7 +329,7 @@ def test_variables_model_names():
     class C2(B): ...
 
     assert variables.model_names(A) == {"B", "C1", "C2"}
-    assert variables.model_names() == {S.GDAS, S.GFS, S.HRRR, S.PREPBUFR}
+    assert variables.model_names() == {S.GDAS, S.GFS, S.HRRR, S.PREPBUFR, S.STAGEIV}
 
 
 def test_variables__da_val__fail_unparesable(da_flat):
